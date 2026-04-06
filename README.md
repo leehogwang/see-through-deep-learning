@@ -4,6 +4,29 @@ See Through Deep Learning is a research-oriented tool for inspecting PyTorch mod
 
 The current application lives in `dl-visualizer/`. It combines a React-based graph UI with a lightweight server and a Python parser that extracts module structure from model source files.
 
+## Visual Overview
+
+<p align="center">
+  <img src="docs/graph-overview.png" alt="See Through Deep Learning graph overview" width="900" />
+</p>
+
+## How It Works
+
+```mermaid
+flowchart LR
+    A[PyTorch model source] --> B[parse_model.py]
+    B --> C[Parsed module graph]
+    C --> D[modelToGraph.ts]
+    D --> E[layoutGraph.ts with Dagre]
+    E --> F[Interactive React graph UI]
+```
+
+## What You See
+
+- Top-level module structure and branch flow
+- Static tensor routing such as fusion, masking, and merge points
+- Expandable submodules for deeper inspection without losing the overall pipeline
+
 ## Why This Repository
 
 - Visualize PyTorch model structure from source code
