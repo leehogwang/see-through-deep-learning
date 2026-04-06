@@ -7,7 +7,15 @@ The current application lives in `dl-visualizer/`. It combines a React-based gra
 ## Visual Overview
 
 <p align="center">
-  <img src="docs/graph-overview.png" alt="See Through Deep Learning graph overview" width="900" />
+  <img src="docs/ui-overview.png" alt="See Through Deep Learning actual application screenshot" width="900" />
+</p>
+
+This screenshot shows the real application rendering `FusionNutritionModelRecipeRAG` from `recipe_adamine/model_recipe_rag_RNS.py` in high-level view.
+
+## Demo
+
+<p align="center">
+  <img src="docs/demo.gif" alt="See Through Deep Learning demo gif" width="900" />
 </p>
 
 ## How It Works
