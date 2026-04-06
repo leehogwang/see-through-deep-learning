@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Inter, system-ui, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root { height: 100vh; }
+
+/* React Flow 커스텀 */
+.react-flow__node { font-family: inherit; }
+.react-flow__attribution { display: none; }
