@@ -8,6 +8,7 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -18,7 +19,7 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import LayerNode, { type LayerNodeData } from './nodes/LayerNode'
-import InspectorDrawer from './InspectorDrawer'
+// InspectorDrawer는 미니맵 패널로 대체됨
 import { getBlockDef, type ParamValue } from '../../data/blocks'
 import { calcOutputShape, parseShape, type Shape } from '../../lib/shapeCalculator'
 import { generatePyTorchCode } from '../../lib/graphToCode'
@@ -27,17 +28,21 @@ import {
   type AgentGraphSnapshot,
   createWorktree,
   saveToWorktree,
+  // mergeWorktreeToMain은 App.tsx에서 호출
   getCodexStatus,
   validateCodexEdit,
   applyCodexSourceEdit,
   parseDirRegistry,
+  traceLayerData,
   type LoadedModelPayload,
 } from '../../lib/api'
 import { modelToGraph } from '../../lib/modelToGraph'
 import { buildGraphDiagnostics, decorateNodesWithDiagnostics } from '../../lib/graphDiagnostics'
 import { layoutGraphWithDirection } from '../../lib/layoutGraph'
+import FlowEdge from './edges/FlowEdge'
 
 const NODE_TYPES = { layerNode: LayerNode }
+const EDGE_TYPES = { flowEdge: FlowEdge }
 
 let nodeId = 0
 const uid = () => `n${++nodeId}`
@@ -62,7 +67,8 @@ function makeEdge(source: string, target: string): Edge {
     id: `e_${source}_${target}`,
     source,
     target,
-    animated: true,
+    type: 'flowEdge',
+    animated: false,
     style: { stroke: '#6366f1', strokeWidth: 2 },
   }
 }
@@ -227,27 +233,44 @@ function parseNumericParam(value: ParamValue | undefined, fallback: number): num
 function inferRecoveryInputShape(targetNode: Node | undefined): string | null {
   if (!targetNode) return null
   const data = targetNode.data as LayerNodeData
-  const type = data.blockType.toLowerCase()
   const params = data.params || {}
 
-  if (type === 'conv1d') {
-    return `B, ${parseNumericParam(params.in_ch, 3)}, 128`
+  // Algorithmic approach: probe the shape calculator with decreasing-rank
+  // candidate inputs and return the first shape that doesn't produce an error.
+  // This avoids maintaining any list of blockType names and works for any block
+  // — including custom/future ones — as long as shapeCalculator is updated.
+
+  // Build best-guess channel/feature sizes from whatever params exist,
+  // falling back to sensible defaults when the param is absent.
+  const inputCh = parseNumericParam(
+    (params.in_ch ?? params.in_channels) as ParamValue | undefined,
+    3,
+  )
+  const seqDim = parseNumericParam(
+    (params.embed_dim ?? params.d_model ?? params.in_features ?? params.in_ch) as ParamValue | undefined,
+    128,
+  )
+
+  // Candidates ordered from highest rank to lowest.  The candidate's `shape`
+  // is passed to calcOutputShape as the simulated input; if it produces no
+  // error that rank is correct for this block.
+  const candidates: Array<{ shape: Shape; str: string }> = [
+    // 5-D: volumetric / video convolutions (B, C, D, H, W)
+    { shape: [-1, inputCh, 16, 64, 64], str: `B, ${inputCh}, 16, 64, 64` },
+    // 4-D: image convolutions (B, C, H, W)
+    { shape: [-1, inputCh, 224, 224],   str: `B, ${inputCh}, 224, 224` },
+    // 3-D: sequences / attention (B, T, D)
+    { shape: [-1, 16, seqDim],          str: `B, 16, ${seqDim}` },
+    // 2-D: linear / embedding lookup (B, D)
+    { shape: [-1, seqDim],              str: `B, ${seqDim}` },
+  ]
+
+  for (const { shape, str } of candidates) {
+    const { error } = calcOutputShape(data.blockType, params, shape, [shape])
+    if (!error) return str
   }
-  if (['conv2d', 'depthwiseconv2d', 'dilatedconv2d', 'transposedconv2d'].includes(type)) {
-    return `B, ${parseNumericParam(params.in_ch, 3)}, 224, 224`
-  }
-  if (type === 'conv3d') {
-    return `B, ${parseNumericParam(params.in_ch, 3)}, 16, 64, 64`
-  }
-  if (['multiheadattention', 'selfattention', 'crossattention', 'flashattention', 'gqa', 'mqa', 'linearattention', 'transformerencoderlayer', 'transformerdecoderlayer'].includes(type)) {
-    return `B, 16, ${parseNumericParam(params.embed_dim ?? params.d_model, 128)}`
-  }
-  if (type === 'embedding') {
-    return 'B, 16'
-  }
-  if (['linear', 'bilinear'].includes(type)) {
-    return `B, ${parseNumericParam(params.in_features ?? params.in1_features, 128)}`
-  }
+
+  // All ranks failed — caller will keep the existing Input shape unchanged.
   return null
 }
 
@@ -510,6 +533,19 @@ function applyAgentActionsToGraph(
               shapeError: false,
               _runtimeShapeLocked: false,
               _editedByAgent: true,
+              // Clear model-parse metadata that belongs to the old node identity
+              _attrName: undefined,
+              _attrPath: undefined,
+              _customClassName: undefined,
+              _groupName: undefined,
+              _groupColor: undefined,
+              _isTopLevel: undefined,
+              _isCollapsed: undefined,
+              _subgraphSize: undefined,
+              _isUtility: undefined,
+              _expectedTerminal: undefined,
+              _usesSelfState: undefined,
+              _dataPreview: undefined,
             } satisfies LayerNodeData,
           }
         })
@@ -565,10 +601,11 @@ interface Props {
   loadedModel?: LoadedModelPayload | null
   onWorktreeSaved?: (path: string, branch: string) => void
   onGraphSnapshotChange?: (snapshot: AgentGraphSnapshot) => void
+  onMergeRequested?: (worktreePath: string, branch: string) => void
 }
 
 const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
-  { catalogVersion = 0, onNodeSelect, loadedModel, onWorktreeSaved, onGraphSnapshotChange }: Props,
+  { catalogVersion = 0, onNodeSelect, loadedModel, onWorktreeSaved, onGraphSnapshotChange, onMergeRequested }: Props,
   ref,
 ) {
   const [nodes, setNodes] = useNodesState<Node>([])
@@ -576,32 +613,52 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
-  const [showCode, setShowCode] = useState(false)
-  const [code, setCode] = useState('')
+  const [_showCode, setShowCode] = useState(false)
+  void _showCode
+  const [_code, setCode] = useState('')
+  void _code
   const [savingWorktree, setSavingWorktree] = useState(false)
   const [worktreeInfo, setWorktreeInfo] = useState<{ path: string; branch: string } | null>(null)
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const worktreeInfoRef = useRef<{ path: string; branch: string } | null>(null)
   const [expandModules, setExpandModules] = useState(false)
   const [hideUtilityOps, setHideUtilityOps] = useState(true)
   const [drawerOpen, setDrawerOpen] = useState(true)
-  const [drawerTab, setDrawerTab] = useState<'sample' | 'diagnostics'>('sample')
-  const [hideExpectedTerminals, setHideExpectedTerminals] = useState(true)
+  // drawerTab은 Diagnostics 전용으로 고정 — Sample Data는 플로팅 패널로 이동
+  const [_drawerTab, setDrawerTab] = useState<'sample' | 'diagnostics'>('diagnostics')
+  void _drawerTab
+  const [_hideExpectedTerminals, _setHideExpectedTerminals] = useState(true)
+  void _hideExpectedTerminals
   const [pendingConnectionSourceId, setPendingConnectionSourceId] = useState<string | null>(null)
-  const [codexStatus, setCodexStatus] = useState<Awaited<ReturnType<typeof getCodexStatus>> | null>(null)
-  const [codexValidation, setCodexValidation] = useState<{
+  const [_codexStatus, setCodexStatus] = useState<Awaited<ReturnType<typeof getCodexStatus>> | null>(null)
+  void _codexStatus
+  const [_codexValidation, setCodexValidation] = useState<{
     status: 'idle' | 'running' | 'done' | 'error'
     message: string
   }>({ status: 'idle', message: '' })
+  void _codexValidation
   const [codexInstruction, setCodexInstruction] = useState('')
-  const [codexEdit, setCodexEdit] = useState<{
+  const [_codexEdit, setCodexEdit] = useState<{
     status: 'idle' | 'running' | 'done' | 'error'
     message: string
     diffSummary?: string
   }>({ status: 'idle', message: '' })
+  void _codexEdit
   const [surfaceStatus, setSurfaceStatus] = useState<{
     level: 'idle' | 'success' | 'error'
     message: string
   }>({ level: 'idle', message: '' })
   const [resolvedRegistry, setResolvedRegistry] = useState<Record<string, LoadedModelPayload['model']>>({})
+  // Track whether the agent has made edits since the last model load.
+  // When true, secondary effect triggers (registry load, catalog version change)
+  // must NOT overwrite the graph with the original parsed model.
+  const agentDirtyRef = useRef(false)
+  const loadedModelSourceRef = useRef<string | null>(null)
+  const loadedModelRef = useRef<LoadedModelPayload | null | undefined>(null)
+  loadedModelRef.current = loadedModel
+  const rfInstanceRef = useRef<ReturnType<typeof useReactFlow> | null>(null)
 
   const commitGraph = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
     const dedupedEdges = dedupeEdges(nextEdges)
@@ -610,7 +667,24 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     edgesRef.current = dedupedEdges
     setNodes(propagatedNodes)
     setEdges(dedupedEdges)
-  }, [setEdges, setNodes])
+
+    // 워크트리가 있으면 디바운스(1.5초) 후 자동 저장
+    if (worktreeInfoRef.current && loadedModel?.gitInfo.root && loadedModel?.sourceFile) {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+      setAutoSaveStatus('saving')
+      autoSaveTimerRef.current = setTimeout(async () => {
+        const wt = worktreeInfoRef.current
+        if (!wt || !loadedModel?.gitInfo.root || !loadedModel?.sourceFile) return
+        try {
+          const generated = generatePyTorchCode(propagatedNodes, dedupedEdges)
+          await saveToWorktree(wt.path, loadedModel.gitInfo.root, loadedModel.sourceFile, generated)
+          setAutoSaveStatus('saved')
+        } catch (_) {
+          setAutoSaveStatus('error')
+        }
+      }, 1500)
+    }
+  }, [setEdges, setNodes, loadedModel])
 
   const handleNodesChange = useCallback((changes: NodeChange<Node>[]) => {
     const nextNodes = applyNodeChanges(changes, nodesRef.current)
@@ -638,6 +712,9 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     async executeAgentActions(actions) {
       const result = applyAgentActionsToGraph(actions, nodesRef.current, edgesRef.current)
       commitGraph(result.nodes, result.edges)
+      if (result.applied > 0) {
+        agentDirtyRef.current = true
+      }
       return {
         applied: result.applied,
         warnings: result.warnings,
@@ -649,6 +726,29 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   useEffect(() => {
     setResolvedRegistry(loadedModel?.registry ?? {})
   }, [loadedModel])
+
+  // worktreeInfo ref \ub3d9\uae30\ud654 (\ucf5c\ubc31 \ud074\ub85c\uc800\uc5d0\uc11c \uc0ac\uc6a9\ud558\uae30 \uc704\ud574)\n  useEffect(() => {\n    worktreeInfoRef.current = worktreeInfo\n  }, [worktreeInfo])
+
+  // \ubaa8\ub378\uc744 \uc5ec\ub294 \uc21c\uac04 \uc790\ub3d9\uc73c\ub85c copy \uc6cc\ud06c\ud2b8\ub9ac \uc0dd\uc131
+  useEffect(() => {
+    if (!loadedModel?.gitInfo.isGit || !loadedModel?.gitInfo.root || !loadedModel?.sourceFile) return
+    // \uc774\uc804 \uc6cc\ud06c\ud2b8\ub9ac\uac00 \uc788\uc73c\uba74 \uc7ac\uc0ac\uc6a9
+    if (worktreeInfoRef.current) return
+
+    let cancelled = false
+    createWorktree(loadedModel.gitInfo.root, loadedModel.sourceFile)
+      .then((wt) => {
+        if (cancelled) return
+        setWorktreeInfo({ path: wt.worktreePath, branch: wt.branch })
+        onWorktreeSaved?.(wt.worktreePath, wt.branch)
+      })
+      .catch((e) => {
+        if (cancelled) return
+        console.warn('[dl-viz] \uc6cc\ud06c\ud2b8\ub9ac \uc790\ub3d9 \uc0dd\uc131 \uc2e4\ud328:', e)
+      })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedModel?.sourceFile])
 
   useEffect(() => {
     if (!loadedModel || !expandModules) return
@@ -670,6 +770,18 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   useEffect(() => {
     if (!loadedModel) return
 
+    // If the loaded model source file changed, reset dirty flag so the new
+    // model is always rendered fresh.
+    const newSource = loadedModel.sourceFile ?? null
+    if (newSource !== loadedModelSourceRef.current) {
+      loadedModelSourceRef.current = newSource
+      agentDirtyRef.current = false
+    }
+
+    // Secondary effect triggers (registry load, catalog version change, toggle
+    // changes) must not overwrite agent edits made to the current model.
+    if (agentDirtyRef.current) return
+
     const graph = modelToGraph(
       loadedModel.model,
       resolvedRegistry,
@@ -685,6 +797,97 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     setCodexEdit({ status: 'idle', message: '', diffSummary: '' })
     setSurfaceStatus({ level: 'idle', message: '' })
   }, [catalogVersion, commitGraph, expandModules, hideUtilityOps, loadedModel, resolvedRegistry])
+
+  // ── Data flow trace: run after model loads, update each node's _dataPreview ──
+  useEffect(() => {
+    if (!loadedModel?.sourceFile || !loadedModel.model?.name) return
+
+    const gitRoot = loadedModel.gitInfo?.root
+    const repoRoot = gitRoot ?? loadedModel.sourceFile.replace(/\/[^/]+$/, '')
+    const payload = {
+      repoRoot,
+      sourceFile: loadedModel.sourceFile,
+      modelName: loadedModel.model.name,
+      runtimeFactory: loadedModel.constructorCallable ?? null,
+      task: loadedModel.benchmark?.task ?? '',
+      sample: loadedModel.samplePreview?.resolvedPath ? {
+        resolvedPath: loadedModel.samplePreview.resolvedPath,
+        width: loadedModel.samplePreview.width,
+        height: loadedModel.samplePreview.height,
+        mimeType: loadedModel.samplePreview.mimeType,
+        source: loadedModel.samplePreview.source,
+        strategy: loadedModel.samplePreview.strategy,
+      } : null,
+    }
+
+    let cancelled = false
+    traceLayerData(payload).then((result) => {
+      if (cancelled) return
+      if (result.error && Object.keys(result.previews).length === 0 && Object.keys(result.inputPreviews).length === 0) return
+
+      // Pre-compute ordered input entries so multi-input models can match positionally
+      const inputEntries = Object.entries(result.inputPreviews)
+
+      setNodes((prevNodes) => {
+        // Collect all input-like nodes (no incoming edges) so each gets its own
+        // input tensor positionally — works for any number of inputs and any
+        // block type used as the graph entry point, not just blockType === 'Input'.
+        const currentEdges = edgesRef.current
+        const inputNodeIds = new Set(
+          prevNodes
+            .filter((n) => !currentEdges.some((e) => e.target === n.id))
+            .map((n) => n.id),
+        )
+        let inputAssignIndex = 0
+
+        return prevNodes.map((node) => {
+          const data = node.data as LayerNodeData
+
+          // ── Input-like nodes: no incoming edges → assign input tensor previews ──
+          // Detection is structural, not by blockType string, so it generalises to
+          // any architecture (e.g. nn.Sequential, custom modules, multi-input models).
+          if (inputNodeIds.has(node.id)) {
+            const nodeKey = data._attrPath ?? data._attrName
+            const namedEntry = nodeKey
+              ? inputEntries.find(([k]) => k === nodeKey || k.startsWith(nodeKey) || nodeKey.startsWith(k))
+              : undefined
+            if (namedEntry) {
+              return { ...node, data: { ...data, _dataPreview: namedEntry[1] } satisfies LayerNodeData }
+            }
+            // Fall back to positional assignment so each Input card gets a distinct tensor
+            const positional = inputEntries[inputAssignIndex]
+            if (positional) {
+              inputAssignIndex += 1
+              return { ...node, data: { ...data, _dataPreview: positional[1] } satisfies LayerNodeData }
+            }
+            return node
+          }
+
+          // ── All other nodes: match by _attrPath / _attrName ──
+          const matchKey = data._attrPath ?? data._attrName
+          if (matchKey) {
+            // Exact match
+            if (result.previews[matchKey]) {
+              return { ...node, data: { ...data, _dataPreview: result.previews[matchKey] } satisfies LayerNodeData }
+            }
+            // Suffix / prefix match (dotted paths like "layer1.0" vs "layer1.0.conv")
+            const suffixMatch = Object.entries(result.previews).find(
+              ([k]) => k === matchKey || k.endsWith(`.${matchKey}`) || matchKey.endsWith(`.${k}`),
+            )
+            if (suffixMatch) {
+              return { ...node, data: { ...data, _dataPreview: suffixMatch[1] } satisfies LayerNodeData }
+            }
+          }
+
+          return node
+        })
+      })
+    }).catch(() => { /* trace failure is silent — cards remain visible without preview */ })
+
+    return () => { cancelled = true }
+  // Re-run only when the loaded model changes (not on every graph mutation)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedModel])
 
   useEffect(() => {
     let cancelled = false
@@ -738,10 +941,81 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
       }
     })
     commitGraph(nextNodes, edgesRef.current)
+
+    // 파라미터 변경 후 1.5초 debounce → trace 재실행 (미리보기 이미지 갱신)
+    const lm = loadedModelRef.current
+    if (lm?.sourceFile && lm?.model?.name) {
+      if (retraceTimerRef.current) clearTimeout(retraceTimerRef.current)
+      retraceTimerRef.current = setTimeout(() => {
+        const m = loadedModelRef.current
+        if (!m?.sourceFile || !m?.model?.name) return
+        const gitRoot = m.gitInfo?.root
+        const repoRoot = gitRoot ?? m.sourceFile.replace(/\/[^/]+$/, '')
+        const payload = {
+          repoRoot,
+          sourceFile: m.sourceFile,
+          modelName: m.model.name,
+          runtimeFactory: m.constructorCallable ?? null,
+          task: m.benchmark?.task ?? '',
+          sample: m.samplePreview?.resolvedPath ? {
+            resolvedPath: m.samplePreview.resolvedPath,
+            width: m.samplePreview.width,
+            height: m.samplePreview.height,
+            mimeType: m.samplePreview.mimeType,
+            source: m.samplePreview.source,
+            strategy: m.samplePreview.strategy,
+          } : null,
+        }
+        traceLayerData(payload).then((result) => {
+          if (result.error && Object.keys(result.previews).length === 0 && Object.keys(result.inputPreviews).length === 0) return
+          const inputEntries = Object.entries(result.inputPreviews)
+          setNodes((prevNodes) => {
+            const currentEdges = edgesRef.current
+            const inputNodeIds = new Set(
+              prevNodes.filter((n) => !currentEdges.some((e) => e.target === n.id)).map((n) => n.id)
+            )
+            let inputAssignIndex = 0
+            return prevNodes.map((node) => {
+              const data = node.data as LayerNodeData
+              if (inputNodeIds.has(node.id)) {
+                const nodeKey = data._attrPath ?? data._attrName
+                const namedEntry = nodeKey
+                  ? inputEntries.find(([k]) => k === nodeKey || k.startsWith(nodeKey) || nodeKey.startsWith(k))
+                  : undefined
+                if (namedEntry) return { ...node, data: { ...data, _dataPreview: namedEntry[1] } satisfies LayerNodeData }
+                const positional = inputEntries[inputAssignIndex]
+                if (positional) { inputAssignIndex += 1; return { ...node, data: { ...data, _dataPreview: positional[1] } satisfies LayerNodeData } }
+                return node
+              }
+              const matchKey = data._attrPath ?? data._attrName
+              if (matchKey) {
+                if (result.previews[matchKey]) return { ...node, data: { ...data, _dataPreview: result.previews[matchKey] } satisfies LayerNodeData }
+                const suffixMatch = Object.entries(result.previews).find(([k]) => k === matchKey || k.endsWith(`.${matchKey}`) || matchKey.endsWith(`.${k}`))
+                if (suffixMatch) return { ...node, data: { ...data, _dataPreview: suffixMatch[1] } satisfies LayerNodeData }
+              }
+              return node
+            })
+          })
+        }).catch(() => {})
+      }, 1500)
+    }
   }, [commitGraph])
 
   const diagnostics = buildGraphDiagnostics(nodes, edges, loadedModel?.model)
   const graphHealth = graphHealthFromDiagnostics(diagnostics)
+
+  // 노드 id → outputShape / hasData / tensorSample 맵 (엣지 장식용)
+  const nodeShapeMap = new Map(
+    nodes.map(n => {
+      const nd = n.data as LayerNodeData
+      const preview = nd._dataPreview
+      const tensorSample = preview?.kind === 'vector'
+        ? preview.values.slice(0, 5)
+        : undefined
+      return [n.id, { shape: nd.outputShape, hasData: !!preview, tensorSample }]
+    })
+  )
+
   const renderedNodes = decorateNodesWithDiagnostics(nodes, diagnostics).map((node) => ({
     ...node,
     data: {
@@ -754,6 +1028,21 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
       _onUpdateParam: handleUpdateParam,
     } satisfies LayerNodeData,
   }))
+
+  // 엣지에 데이터 흐름 정보 장식 (source 노드의 shape, hasData)
+  const renderedEdges = edges.map(edge => {
+    const src = nodeShapeMap.get(edge.source)
+    return {
+      ...edge,
+      type: 'flowEdge',
+      data: {
+        ...((edge.data as object | undefined) ?? {}),
+        hasData: src?.hasData ?? false,
+        shapeLabel: src?.shape ?? undefined,
+        tensorSample: src?.tensorSample ?? undefined,
+      },
+    }
+  })
 
   const handleSaveWorktree = async () => {
     if (!loadedModel?.gitInfo.isGit || !loadedModel?.gitInfo.root) return
@@ -781,12 +1070,14 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     commitGraph(laidOut.nodes, laidOut.edges)
     setSurfaceStatus({ level: 'success', message: `Auto layout applied (${direction}).` })
   }, [commitGraph])
+  void handleAutoLayout
 
   const handleNormalizeInputShapes = useCallback(() => {
     const normalized = normalizeInputNodeShapes(nodesRef.current, edgesRef.current)
     commitGraph(normalized, edgesRef.current)
     setSurfaceStatus({ level: 'success', message: 'Normalized Input node shapes to match connected downstream layers.' })
   }, [commitGraph])
+  void handleNormalizeInputShapes
 
   const handleClearGraph = useCallback(() => {
     commitGraph([], [])
@@ -840,6 +1131,8 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
       })
     }
   }
+  void handleValidateCodex
+  void handleApplyCodexEdit
 
   const onConnect = useCallback((params: Connection) => {
     if (!params.source || !params.target) return
@@ -1090,6 +1383,33 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
         >
           Generate PyTorch Code
         </button>
+
+        {/* 워크트리 자동저장 상태 + Merge 버튼 */}
+        {worktreeInfo && (
+          <>
+            <span style={{ fontSize: 10, color: autoSaveStatus === 'saved' ? '#34d399' : autoSaveStatus === 'error' ? '#f87171' : '#94a3b8' }}>
+              {autoSaveStatus === 'saved' ? `✓ auto-saved → ${worktreeInfo.branch}` :
+               autoSaveStatus === 'saving' ? '⏳ saving…' :
+               autoSaveStatus === 'error' ? '✗ save failed' :
+               `branch: ${worktreeInfo.branch}`}
+            </span>
+            <button
+              data-testid="merge-worktree-button"
+              onClick={() => onMergeRequested?.(worktreeInfo.path, worktreeInfo.branch)}
+              style={{
+                padding: '5px 12px',
+                borderRadius: 6,
+                border: '1px solid #22c55e',
+                background: 'transparent',
+                color: '#22c55e',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              ⬆ Merge to Main
+            </button>
+          </>
+        )}
       </div>
 
       <div
@@ -1099,7 +1419,7 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
       >
         <ReactFlow
           nodes={renderedNodes}
-          edges={edges}
+          edges={renderedEdges}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
@@ -1108,10 +1428,12 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           fitView
           fitViewOptions={{ padding: 0.18 }}
           deleteKeyCode="Delete"
           style={{ background: '#0f1117' }}
+          onInit={(instance) => { rfInstanceRef.current = instance as unknown as ReturnType<typeof useReactFlow> }}
         >
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1e2535" />
           <Controls className="!bg-[#161b27] !border-[#2a3347]" />
@@ -1130,70 +1452,250 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
         )}
       </div>
 
+      {/* 하단 바 — Canvas Map + Sample Data + Graph Stats (같은 행) */}
       {drawerOpen && (
-        <InspectorDrawer
-          activeTab={drawerTab}
-          onTabChange={setDrawerTab}
-          samplePreview={loadedModel?.samplePreview}
-          benchmark={loadedModel?.benchmark}
-          diagnostics={diagnostics}
+        <BottomBar
+          nodes={nodes}
+          edges={edges}
           graphHealth={graphHealth}
-          hideExpectedTerminals={hideExpectedTerminals}
-          onToggleHideExpectedTerminals={() => setHideExpectedTerminals((current) => !current)}
-          onAutoLayout={() => handleAutoLayout('LR')}
-          onNormalizeInputShapes={handleNormalizeInputShapes}
-          onClearGraph={handleClearGraph}
-          codexStatus={codexStatus}
-          codexValidation={codexValidation}
-          onValidateCodex={handleValidateCodex}
-          codexInstruction={codexInstruction}
-          onCodexInstructionChange={setCodexInstruction}
-          codexEdit={codexEdit}
-          onApplyCodexEdit={handleApplyCodexEdit}
-          traceMode={formatTraceMode(loadedModel?.traceMode)}
-          exactness={formatExactness(loadedModel?.exactness)}
-          unsupportedReason={loadedModel?.unsupportedReason}
-          constructorStrategy={loadedModel?.constructorStrategy}
-          constructorCallable={loadedModel?.constructorCallable}
-          inputStrategy={loadedModel?.inputStrategy}
-          runtimeMs={loadedModel?.runtimeMs}
+          diagnostics={diagnostics}
+          loadedModel={loadedModel}
+          onNavigate={(x, y) => {
+            const inst = rfInstanceRef.current as unknown as { setCenter: (x: number, y: number, opts: object) => void; getZoom: () => number } | null
+            if (inst) inst.setCenter(x, y, { zoom: inst.getZoom(), duration: 400 })
+          }}
         />
-      )}
-
-      {showCode && (
-        <div className="absolute inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
-          <div className="bg-[#161b27] border border-[#2a3347] rounded-xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a3347]">
-              <span className="text-sm font-semibold text-slate-200">Generated PyTorch Code</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => navigator.clipboard.writeText(code)}
-                  className="text-xs px-2 py-1 rounded border border-[#2a3347] text-slate-400 hover:text-slate-200 transition-colors"
-                >
-                  Copy
-                </button>
-                <button
-                  onClick={() => setShowCode(false)}
-                  className="text-xs px-2 py-1 rounded border border-[#2a3347] text-slate-400 hover:text-red-400 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <pre
-              data-testid="generated-code-output"
-              className="flex-1 overflow-auto p-4 text-xs font-mono text-emerald-300 leading-relaxed"
-            >
-              {code}
-            </pre>
-          </div>
-        </div>
       )}
     </div>
   )
 })
 
 export default FlowCanvas
+
+// ── CanvasMapPanel ─────────────────────────────────────────────────────────────
+
+function CanvasMapPanel({
+  nodes,
+  edges,
+  onClickCanvas,
+}: {
+  nodes: import('@xyflow/react').Node[]
+  edges: import('@xyflow/react').Edge[]
+  onClickCanvas?: (canvasX: number, canvasY: number) => void
+}) {
+  if (nodes.length === 0) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#1e2535', fontSize: 11 }}>
+        Empty canvas
+      </div>
+    )
+  }
+
+  const xs = nodes.map(n => n.position.x)
+  const ys = nodes.map(n => n.position.y)
+  const minX = Math.min(...xs) - 40
+  const minY = Math.min(...ys) - 40
+  const maxX = Math.max(...xs) + 220
+  const maxY = Math.max(...ys) + 80
+  const vbW = maxX - minX || 400
+  const vbH = maxY - minY || 200
+
+  const handleSvgClick = onClickCanvas
+    ? (e: React.MouseEvent<SVGSVGElement>) => {
+        const svg = e.currentTarget
+        const rect = svg.getBoundingClientRect()
+        const px = (e.clientX - rect.left) / rect.width
+        const py = (e.clientY - rect.top) / rect.height
+        const canvasX = minX + px * vbW
+        const canvasY = minY + py * vbH
+        onClickCanvas(canvasX, canvasY)
+      }
+    : undefined
+
+  const nodeMap = new Map(nodes.map(n => [n.id, n]))
+
+  return (
+    <svg
+      viewBox={`${minX} ${minY} ${vbW} ${vbH}`}
+      style={{ width: '100%', height: '100%', display: 'block', cursor: onClickCanvas ? 'crosshair' : 'default' }}
+      preserveAspectRatio="xMidYMid meet"
+      onClick={handleSvgClick}
+    >
+      {/* edges */}
+      {edges.map(e => {
+        const src = nodeMap.get(e.source)
+        const tgt = nodeMap.get(e.target)
+        if (!src || !tgt) return null
+        const x1 = src.position.x + 90
+        const y1 = src.position.y + 30
+        const x2 = tgt.position.x + 90
+        const y2 = tgt.position.y + 30
+        return (
+          <line key={e.id} x1={x1} y1={y1} x2={x2} y2={y2}
+            stroke="#2a3347" strokeWidth={8} strokeLinecap="round" />
+        )
+      })}
+      {/* nodes */}
+      {nodes.map(n => {
+        const nd = n.data as LayerNodeData
+        const color = nd._groupColor ?? '#4a556a'
+        const hasData = !!nd._dataPreview
+        return (
+          <g key={n.id}>
+            <rect
+              x={n.position.x} y={n.position.y}
+              width={180} height={50}
+              rx={8}
+              fill="#161b27"
+              stroke={hasData ? color : '#2a3347'}
+              strokeWidth={hasData ? 3 : 1.5}
+            />
+            <text
+              x={n.position.x + 90} y={n.position.y + 22}
+              textAnchor="middle" dominantBaseline="middle"
+              fill="#94a3b8" fontSize={14} fontFamily="monospace"
+            >
+              {nd.blockType}
+            </text>
+            {nd.outputShape && (
+              <text
+                x={n.position.x + 90} y={n.position.y + 38}
+                textAnchor="middle" dominantBaseline="middle"
+                fill="#334155" fontSize={10} fontFamily="monospace"
+              >
+                {nd.outputShape}
+              </text>
+            )}
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+// ── 하단 바: Canvas Map + Sample Data + Stats (같은 행) ──────────────────────
+
+function BottomBar({
+  nodes,
+  edges,
+  graphHealth,
+  diagnostics,
+  loadedModel,
+  onNavigate,
+}: {
+  nodes: import('@xyflow/react').Node[]
+  edges: import('@xyflow/react').Edge[]
+  graphHealth: { level: string; label: string }
+  diagnostics: { severity: string }[]
+  loadedModel?: import('../../lib/api').LoadedModelPayload | null
+  onNavigate?: (canvasX: number, canvasY: number) => void
+}) {
+
+  return (
+    <div style={{
+      height: 140,
+      background: '#0d1120',
+      borderTop: '1px solid #1e2535',
+      display: 'flex',
+      alignItems: 'stretch',
+      flexShrink: 0,
+    }}>
+      {/* 미니맵 — 클릭하면 해당 위치로 이동 */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', top: 8, left: 12,
+          fontSize: 9, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, zIndex: 1,
+        }}>Canvas Map</div>
+        <div style={{ width: '100%', height: '100%', paddingTop: 24 }}>
+          <CanvasMapPanel nodes={nodes} edges={edges} onClickCanvas={onNavigate} />
+        </div>
+      </div>
+
+      {/* Sample Data — 모델 로딩 시에만 표시 */}
+      {loadedModel?.samplePreview && (
+        <div style={{
+          width: 180,
+          borderLeft: '1px solid #1e2535',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          <div style={{
+            padding: '4px 10px',
+            borderBottom: '1px solid #1e2535',
+            fontSize: 9,
+            fontWeight: 600,
+            color: '#64748b',
+            textTransform: 'uppercase',
+            letterSpacing: '0.07em',
+            background: '#0d1120',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            flexShrink: 0,
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#34d399', display: 'inline-block' }} />
+            Sample Data
+            {loadedModel.benchmark?.label && (
+              <span style={{ marginLeft: 'auto', fontSize: 8, color: '#334155' }}>
+                {loadedModel.benchmark.label}
+              </span>
+            )}
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {loadedModel.samplePreview.imageUrl ? (
+              <img
+                data-testid="sample-preview-image"
+                src={loadedModel.samplePreview.imageUrl}
+                alt={loadedModel.samplePreview.caption ?? loadedModel.samplePreview.label ?? 'Sample preview'}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
+            ) : (
+              <div style={{ padding: 10, fontSize: 10, color: '#334155' }}>No preview</div>
+            )}
+          </div>
+          {(loadedModel.samplePreview.label || loadedModel.samplePreview.caption) && (
+            <div style={{ padding: '3px 8px', fontSize: 9, color: '#475569', borderTop: '1px solid #1e2535', flexShrink: 0, background: '#0a0f1c' }}>
+              {loadedModel.samplePreview.caption ?? loadedModel.samplePreview.label}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Graph Stats */}
+      <div style={{
+        width: 200,
+        borderLeft: '1px solid #1e2535',
+        padding: '10px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        justifyContent: 'center',
+      }}>
+        <div style={{ fontSize: 9, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Graph</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <StatChip label="Nodes" value={nodes.length} />
+          <StatChip label="Edges" value={edges.length} />
+          <StatChip label="Health" value={graphHealth.label} color={
+            graphHealth.level === 'healthy' ? '#34d399' : graphHealth.level === 'warning' ? '#fbbf24' : '#f87171'
+          } />
+        </div>
+        {loadedModel?.model?.name && (
+          <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>
+            {loadedModel.model.name}
+          </div>
+        )}
+        {diagnostics.filter(d => d.severity === 'error').length > 0 && (
+          <div style={{ fontSize: 10, color: '#f87171' }}>
+            {diagnostics.filter(d => d.severity === 'error').length} error(s)
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── ToolbarButton ─────────────────────────────────────────────────────────────
 
 function ToolbarButton({
   active,
@@ -1219,5 +1721,25 @@ function ToolbarButton({
     >
       {children}
     </button>
+  )
+}
+
+// ── StatChip ─────────────────────────────────────────────────────────────────
+
+function StatChip({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      padding: '4px 10px',
+      background: '#131927',
+      borderRadius: 6,
+      border: '1px solid #1e2535',
+      minWidth: 50,
+    }}>
+      <span style={{ fontSize: 14, fontWeight: 700, color: color ?? '#94a3b8' }}>{value}</span>
+      <span style={{ fontSize: 8, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</span>
+    </div>
   )
 }

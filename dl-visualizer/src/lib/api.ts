@@ -306,3 +306,77 @@ export async function saveToWorktree(
   if (!r.ok) throw new Error((await r.json()).error)
   return r.json()
 }
+
+export async function mergeWorktreeToMain(
+  repoRoot: string,
+  worktreePath: string,
+  branch: string,
+): Promise<{ success: boolean; diffSummary: string }> {
+  const r = await fetch(`${BASE}/api/merge-worktree`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repoRoot, worktreePath, branch }),
+  })
+  if (!r.ok) throw new Error((await r.json()).error)
+  return r.json()
+}
+
+// ── Layer data preview ──────────────────────────────────────────────────────
+
+/**
+ * A compact visual snapshot of a tensor flowing through a specific layer.
+ * The `kind` is inferred purely from tensor rank at trace time — no layer-type
+ * hard-coding.
+ *
+ *  "spatial"  — 4-D (B,C,H,W) feature map, encoded as a grayscale channel-mosaic PNG (base64)
+ *  "sequence" — 3-D (B,T,D) sequence tensor, encoded as a heatmap PNG (base64)
+ *  "vector"   — 2-D (B,D) activation vector, as a raw number array (first batch)
+ */
+export type LayerDataPreview =
+  | { kind: 'spatial';  data: string; shape: number[] }
+  | { kind: 'sequence'; data: string; shape: number[] }
+  | { kind: 'vector';   values: number[]; shape: number[] }
+
+export interface TraceLayerDataResult {
+  /** keyed by module attr path (e.g. "conv1", "layer1.0.conv2") */
+  previews: Record<string, LayerDataPreview>
+  /** keyed by forward() param name (e.g. "x", "input_ids") */
+  inputPreviews: Record<string, LayerDataPreview>
+  error: string | null
+}
+
+/**
+ * Ask the server to run trace_layer_data.py against the loaded model.
+ * Payload mirrors the runtime_trace.py payload format.
+ * Never throws — returns { previews: {}, inputPreviews: {}, error } on failure.
+ */
+export async function traceLayerData(payload: {
+  repoRoot: string
+  sourceFile: string
+  modelName: string
+  runtimeFactory?: string | null
+  task?: string
+  sample?: {
+    resolvedPath?: string
+    width?: number
+    height?: number
+    mimeType?: string
+    source?: string
+    strategy?: string
+  } | null
+}): Promise<TraceLayerDataResult> {
+  try {
+    const r = await fetch(`${BASE}/api/trace-layer-data`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}))
+      return { previews: {}, inputPreviews: {}, error: body.error ?? `HTTP ${r.status}` }
+    }
+    return r.json()
+  } catch (cause) {
+    return { previews: {}, inputPreviews: {}, error: String(cause) }
+  }
+}

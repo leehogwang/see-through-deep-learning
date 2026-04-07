@@ -13,5 +13,8 @@ body {
 #root { height: 100vh; }
 
 /* React Flow 커스텀 */
-.react-flow__node { font-family: inherit; }
+.react-flow__node { font-family: inherit; overflow: visible !important; }
+/* 데이터 프리뷰가 카드 위로 float되도록 z-index 확보 */
+.react-flow__node:has([data-testid]) { z-index: 1; }
+.react-flow__node:hover { z-index: 100 !important; }
 .react-flow__attribution { display: none; }

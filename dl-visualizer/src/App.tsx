@@ -3,7 +3,7 @@ import AgentPanel from './components/AgentPanel/AgentPanel'
 import FlowCanvas, { type FlowCanvasHandle } from './components/FlowCanvas/FlowCanvas'
 import BlockPalette from './components/BlockPalette/BlockPalette'
 import ScanModal from './components/ScanModal/ScanModal'
-import { getBlockCatalog, type AgentCanvasAction, type AgentGraphSnapshot, type LoadedModelPayload } from './lib/api'
+import { getBlockCatalog, mergeWorktreeToMain, type AgentCanvasAction, type AgentGraphSnapshot, type LoadedModelPayload } from './lib/api'
 import { setDynamicBlocks } from './data/blocks'
 
 export default function App() {
@@ -11,6 +11,7 @@ export default function App() {
   const [showScan, setShowScan] = useState(false)
   const [loadedModel, setLoadedModel] = useState<LoadedModelPayload | null>(null)
   const [worktreeNotice, setWorktreeNotice] = useState('')
+  const [merging, setMerging] = useState(false)
   const [catalogVersion, setCatalogVersion] = useState(0)
   const [graphSnapshot, setGraphSnapshot] = useState<AgentGraphSnapshot>({ nodes: [], edges: [] })
   const flowCanvasRef = useRef<FlowCanvasHandle | null>(null)
@@ -36,6 +37,22 @@ export default function App() {
     setLoadedModel(payload)
     setShowScan(false)
     setWorktreeNotice('')
+  }
+
+  const handleMergeRequested = async (worktreePath: string, branch: string) => {
+    if (!loadedModel?.gitInfo.root) return
+    if (!confirm(`"${branch}" 브랜치의 변경사항을 main에 병합할까요?\n\n병합 전 diff를 에이전트가 검토합니다.`)) return
+    setMerging(true)
+    setWorktreeNotice('⏳ 병합 중…')
+    try {
+      const result = await mergeWorktreeToMain(loadedModel.gitInfo.root, worktreePath, branch)
+      setWorktreeNotice(`✓ 병합 완료 (${branch} → main)`)
+      console.info('[dl-viz] merge diff:\n', result.diffSummary)
+    } catch (e) {
+      setWorktreeNotice(`✗ 병합 실패: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setMerging(false)
+    }
   }
 
   const registrySize = loadedModel
@@ -101,9 +118,10 @@ export default function App() {
             onNodeSelect={setSelectedBlockType}
             loadedModel={loadedModel}
             onGraphSnapshotChange={setGraphSnapshot}
-            onWorktreeSaved={(path, branch) =>
-              setWorktreeNotice(`✓ Saved to worktree: ${branch} (${path})`)
+            onWorktreeSaved={(_path, branch) =>
+              setWorktreeNotice(`✓ worktree 생성: ${branch}`)
             }
+            onMergeRequested={merging ? undefined : handleMergeRequested}
           />
         </div>
 

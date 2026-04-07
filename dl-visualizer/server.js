@@ -12,6 +12,7 @@ const BENCHMARKS_ROOT = path.join(WORKSPACE_ROOT, 'benchmarks')
 const MANIFEST_PATH = path.join(BENCHMARKS_ROOT, 'manifest.yaml')
 const REPORT_PATH = path.join(BENCHMARKS_ROOT, 'reports', 'latest.json')
 const RUNTIME_TRACE_PATH = path.join(__dirname, 'runtime_trace.py')
+const TRACE_LAYER_DATA_PATH = path.join(__dirname, 'trace_layer_data.py')
 const TORCH_BLOCK_CATALOG_PATH = path.join(__dirname, 'torch_block_catalog.py')
 
 const app = express()
@@ -1181,8 +1182,78 @@ app.get('/api/read', (req, res) => {
   res.json({ content: fs.readFileSync(file, 'utf8') })
 })
 
+/**
+ * POST /api/merge-worktree
+ * 에이전트가 diff를 검토한 뒤 worktree branch를 현재 HEAD에 fast-forward merge합니다.
+ * fast-forward가 불가능하면 --no-ff 병합을 시도합니다.
+ * body: { repoRoot, worktreePath, branch }
+ */
+app.post('/api/merge-worktree', async (req, res) => {
+  const { repoRoot, worktreePath, branch } = req.body
+  if (!repoRoot || !worktreePath || !branch) {
+    return res.status(400).json({ error: 'repoRoot, worktreePath, branch required' })
+  }
+
+  try {
+    // 1. diff 요약 수집 (에이전트 검토용)
+    let diffSummary = ''
+    try {
+      diffSummary = execFileSync(
+        'git', ['diff', 'HEAD', branch, '--stat'],
+        { cwd: repoRoot, encoding: 'utf8' }
+      ).trim()
+    } catch (_) {
+      diffSummary = '(diff 수집 실패 — 변경 없음으로 간주)'
+    }
+
+    // 2. 변경 사항이 없으면 조기 반환
+    if (!diffSummary) {
+      // worktree 정리
+      try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }) } catch (_) {}
+      try { execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot }) } catch (_) {}
+      return res.json({ success: true, diffSummary: '(변경 사항 없음 — 병합 불필요)' })
+    }
+
+    // 3. fast-forward 병합 시도, 실패 시 --no-ff
+    try {
+      execFileSync('git', ['merge', '--ff-only', branch], { cwd: repoRoot })
+    } catch (_) {
+      execFileSync('git', ['merge', '--no-ff', '-m', `dl-viz: merge ${branch} into main`, branch], { cwd: repoRoot })
+    }
+
+    // 4. worktree 및 임시 브랜치 정리
+    try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }) } catch (_) {}
+    try { execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot }) } catch (_) {}
+
+    res.json({ success: true, diffSummary })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
 app.get('/{*path}', (_req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'))
+})
+
+// POST /api/trace-layer-data
+// Body: same payload structure as runtime_trace.py
+//   { repoRoot, sourceFile, modelName, runtimeFactory?, sample? }
+// Returns: { previews, inputPreviews, error }
+// Never throws — UI always receives a valid JSON response.
+app.post('/api/trace-layer-data', (req, res) => {
+  const { repoRoot, sourceFile, modelName } = req.body ?? {}
+  if (!repoRoot || !sourceFile || !modelName) {
+    return res.json({ previews: {}, inputPreviews: {}, error: 'repoRoot, sourceFile, modelName are required' })
+  }
+  if (!fs.existsSync(sourceFile)) {
+    return res.json({ previews: {}, inputPreviews: {}, error: `sourceFile not found: ${sourceFile}` })
+  }
+  try {
+    const result = runSandboxedPython(TRACE_LAYER_DATA_PATH, req.body, repoRoot)
+    res.json(result)
+  } catch (error) {
+    res.json({ previews: {}, inputPreviews: {}, error: error.message })
+  }
 })
 
 app.listen(PORT, () => {

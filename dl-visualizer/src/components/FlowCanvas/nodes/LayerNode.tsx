@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { getBlockDef, inferParamMeta, type ParamValue } from '../../../data/blocks'
 import { CUSTOM_MODULE_TYPE } from '../../../lib/modelToGraph'
+import type { LayerDataPreview } from '../../../lib/api'
 
 export interface LayerNodeData {
   blockType: string
@@ -30,6 +31,7 @@ export interface LayerNodeData {
   _onStartConnect?: (nodeId: string) => void
   _onUpdateParam?: (nodeId: string, key: string, value: ParamValue) => void
   _isPendingConnectSource?: boolean
+  _dataPreview?: LayerDataPreview
   [key: string]: unknown
 }
 
@@ -84,10 +86,59 @@ export default function LayerNode({ id, data, selected }: NodeProps) {
       data-agent-edited={isAgentEdited ? 'true' : 'false'}
       style={{
         minWidth: isCollapsedModule ? 220 : 180,
+        position: 'relative',
         ...agentRingStyle,
       }}
       title={d.diagnosticReason ?? undefined}
     >
+      {/* 데이터 프리뷰: 카드 위에 floating */}
+      {d._dataPreview && (
+        <div style={{
+          position: 'absolute',
+          bottom: '100%',
+          left: 0,
+          right: 0,
+          marginBottom: 6,
+          zIndex: 10,
+          background: '#0f1117ee',
+          borderRadius: 8,
+          border: `1px solid ${accentColor}44`,
+          padding: (d._dataPreview.kind === 'spatial' && d.blockType === 'Input') ? '0' : '4px 6px',
+          backdropFilter: 'blur(4px)',
+          boxShadow: `0 -4px 16px ${accentColor}22`,
+          overflow: 'hidden',
+        }}>
+          {/* Input 노드 + spatial(이미지) → 샘플 이미지를 크게 표시 */}
+          {d._dataPreview.kind === 'spatial' && d.blockType === 'Input' ? (
+            <div>
+              <img
+                src={`data:image/png;base64,${d._dataPreview.data}`}
+                alt="sample input"
+                style={{
+                  width: '100%',
+                  maxHeight: 100,
+                  objectFit: 'cover',
+                  display: 'block',
+                  imageRendering: 'pixelated',
+                  borderRadius: '8px 8px 0 0',
+                }}
+              />
+              <div style={{
+                padding: '3px 6px',
+                fontSize: 9,
+                fontFamily: 'monospace',
+                color: '#94a3b8',
+                background: '#0b0f1a',
+                borderTop: `1px solid ${accentColor}22`,
+              }}>
+                sample&nbsp;<span style={{ color: '#475569' }}>[{d._dataPreview.shape.join(', ')}]</span>
+              </div>
+            </div>
+          ) : (
+            <DataPreviewPanel preview={d._dataPreview} accentColor={accentColor} />
+          )}
+        </div>
+      )}
       <div
         style={{
           borderRadius: 10,
@@ -423,4 +474,99 @@ function colorForName(name: string): string {
   let hash = 0
   for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) & 0xffff
   return colors[hash % colors.length]
+}
+
+// ── Data Preview Panel ───────────────────────────────────────────────────────
+
+interface DataPreviewPanelProps {
+  preview: LayerDataPreview
+  accentColor: string
+}
+
+function VectorBarChart({ values }: { values: number[] }) {
+  if (values.length === 0) return null
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  // 노드 폭(180px)에 고정 — 값이 많으면 line chart로
+  const W = 164
+  const H = 36
+  const n = values.length
+
+  if (n <= 32) {
+    // bar chart
+    const barW = W / n
+    return (
+      <svg width={W} height={H} style={{ display: 'block', width: '100%', height: H }}>
+        {values.map((v, i) => {
+          const barH = Math.max(1, Math.round(((v - min) / range) * (H - 4)))
+          return (
+            <rect
+              key={i}
+              x={i * barW + 0.5}
+              y={H - barH - 2}
+              width={Math.max(1, barW - 1)}
+              height={barH}
+              fill="#6366f1"
+              opacity={0.8}
+              rx={1}
+            />
+          )
+        })}
+      </svg>
+    )
+  }
+
+  // line chart (값이 많을 때)
+  const pts = values.map((v, i) => {
+    const x = (i / (n - 1)) * W
+    const y = H - 2 - ((v - min) / range) * (H - 4)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return (
+    <svg width={W} height={H} style={{ display: 'block', width: '100%', height: H }}>
+      <polyline points={pts} fill="none" stroke="#818cf8" strokeWidth={1.2} strokeLinejoin="round" />
+      {/* zero line */}
+      {min < 0 && max > 0 && (
+        <line
+          x1={0} y1={H - 2 - ((-min) / range) * (H - 4)}
+          x2={W} y2={H - 2 - ((-min) / range) * (H - 4)}
+          stroke="#334155" strokeWidth={0.8} strokeDasharray="3 3"
+        />
+      )}
+    </svg>
+  )
+}
+
+function DataPreviewPanel({ preview, accentColor }: DataPreviewPanelProps) {
+  const shapeLabel = `[${preview.shape.join(', ')}]`
+  return (
+    <div style={{
+      marginTop: 4,
+      borderTop: `1px solid ${accentColor}22`,
+      paddingTop: 4,
+    }}>
+      <div style={{ fontSize: 9, color: '#475569', marginBottom: 3, fontFamily: 'monospace' }}>
+        ▸ data&nbsp;
+        <span style={{ color: '#334155' }}>{shapeLabel}</span>
+      </div>
+      {(preview.kind === 'spatial' || preview.kind === 'sequence') && (
+        <img
+          src={`data:image/png;base64,${preview.data}`}
+          alt={`tensor preview ${shapeLabel}`}
+          style={{
+            width: '100%',
+            maxHeight: 72,
+            objectFit: 'cover',
+            borderRadius: 4,
+            imageRendering: 'pixelated',
+            display: 'block',
+          }}
+        />
+      )}
+      {preview.kind === 'vector' && (
+        <VectorBarChart values={preview.values} />
+      )}
+    </div>
+  )
 }

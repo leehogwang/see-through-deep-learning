@@ -38,7 +38,43 @@ const QUICK_PROMPTS = [
   },
 ]
 
-const EDIT_INTENT_PATTERN = /(배치|추가|바꿔|교체|삭제|연결|옮겨|정렬|layout|move|replace|add|delete|connect|insert|swap|align)/i
+const EDIT_INTENT_PATTERN = /(배치|추가|바꿔|교체|삭제|연결|옮겨|정렬|쌓|변경|layout|move|replace|add|delete|connect|insert|swap|align|change|stack|more|modify)/i
+
+// 자연어 별칭 → blockType 매핑 (대소문자 무관)
+const BLOCK_ALIASES: Record<string, string> = {
+  'conv':         'Conv2D',
+  'convolution':  'Conv2D',
+  'conv2d':       'Conv2D',
+  'conv1d':       'Conv1D',
+  'conv3d':       'Conv3D',
+  'leaky':        'LeakyReLU',
+  'leakyrelu':    'LeakyReLU',
+  'leaky relu':   'LeakyReLU',
+  'elu':          'ELU',
+  'gelu':         'GELU',
+  'selu':         'SELU',
+  'relu':         'ReLU',
+  'sigmoid':      'Sigmoid',
+  'tanh':         'Tanh',
+  'bn':           'BatchNorm2D',
+  'batchnorm':    'BatchNorm2D',
+  'batch norm':   'BatchNorm2D',
+  'linear':       'Linear',
+  'fc':           'Linear',
+  'dropout':      'Dropout',
+  'maxpool':      'MaxPool2D',
+  'avgpool':      'AvgPool2D',
+  'flatten':      'Flatten',
+  'lstm':         'LSTM',
+  'gru':          'GRU',
+  'transformer':  'TransformerEncoderLayer',
+  'attention':    'MultiheadAttention',
+  'embedding':    'Embedding',
+  'layernorm':    'LayerNorm',
+  'groupnorm':    'GroupNorm',
+  'upsample':     'Upsample',
+  'gap':          'GlobalAvgPool',
+}
 
 function normalizeBlockIdentity(value: string) {
   return String(value || '')
@@ -56,19 +92,34 @@ function selectAgentAvailableBlocks(
   const graphTypes = new Set(graphSnapshot.nodes.map((node) => node.blockType))
   if (selectedBlockType) graphTypes.add(selectedBlockType)
 
-  if (!EDIT_INTENT_PATTERN.test(prompt)) {
-    return []
+  // alias 매핑으로 프롬프트에서 언급된 blockType 수집
+  const aliasMatchedTypes = new Set<string>()
+  for (const [alias, blockType] of Object.entries(BLOCK_ALIASES)) {
+    if (loweredPrompt.includes(alias.toLowerCase())) {
+      aliasMatchedTypes.add(blockType)
+    }
   }
+
+  // 수정 의도가 있거나 그래프가 비어 있지 않으면 관련 블록 전달
+  const hasEditIntent = EDIT_INTENT_PATTERN.test(prompt)
 
   const mentionedBlocks = blockCatalog.filter((block) => {
     const typeMatch = loweredPrompt.includes(block.type.toLowerCase())
     const labelMatch = loweredPrompt.includes(block.label.toLowerCase())
+    const aliasMatch = aliasMatchedTypes.has(block.type)
     const graphMatch = graphTypes.has(block.type)
-    return typeMatch || labelMatch || graphMatch
+    return typeMatch || labelMatch || aliasMatch || (hasEditIntent && graphMatch)
   })
 
-  const deduped = new Map<string, (typeof mentionedBlocks)[number]>()
-  for (const block of mentionedBlocks) {
+  // 아무것도 매칭 안 됐고 수정 의도가 있으면 → 전체 카탈로그 전달 (에이전트가 직접 판단)
+  const candidates = mentionedBlocks.length > 0
+    ? mentionedBlocks
+    : hasEditIntent
+      ? blockCatalog
+      : []
+
+  const deduped = new Map<string, (typeof candidates)[number]>()
+  for (const block of candidates) {
     const key = normalizeBlockIdentity(block.type)
     if (!deduped.has(key)) {
       deduped.set(key, block)

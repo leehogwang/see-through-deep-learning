@@ -13,6 +13,7 @@ function estimateNodeSize(node: Node): { width: number; height: number } {
   if (data._groupName) height += 18
   if (data.outputShape) height += 18
   if (data._isCollapsed) height += 18
+  if (data._dataPreview) height += 80
   return { width, height }
 }
 

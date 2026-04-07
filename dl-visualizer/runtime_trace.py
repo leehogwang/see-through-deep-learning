@@ -53,6 +53,27 @@ def is_tensor_like(value: Any) -> bool:
     return isinstance(value, torch.Tensor)
 
 
+class _DummyClipLike(nn.Module):
+    """CLIP API를 흉내내는 더미 모듈.
+    encode_text / encode_image 호출 시 적절한 크기의 랜덤 텐서를 반환.
+    clip_dim=1024 기본값 (OpenCLIP ViT-L 등)."""
+    def __init__(self, clip_dim: int = 1024):
+        super().__init__()
+        self._clip_dim = clip_dim
+        self._dummy_param = nn.Parameter(torch.zeros(1))  # parameters()가 비지 않도록
+
+    def encode_text(self, text_tokens):
+        b = text_tokens.shape[0] if hasattr(text_tokens, 'shape') else 1
+        return torch.randn(b, self._clip_dim, device=self._dummy_param.device)
+
+    def encode_image(self, images):
+        b = images.shape[0] if hasattr(images, 'shape') else 1
+        return torch.randn(b, self._clip_dim, device=self._dummy_param.device)
+
+    def forward(self, *args, **kwargs):
+        return self.encode_image(args[0]) if args else torch.randn(1, self._clip_dim)
+
+
 def flatten_tensor_tree(value: Any, prefix: str = '') -> list[tuple[str, torch.Tensor]]:
     items: list[tuple[str, torch.Tensor]] = []
     if isinstance(value, torch.Tensor):
@@ -209,6 +230,26 @@ def synth_value_for_param(param: inspect.Parameter, model: Optional[nn.Module] =
     if 'config' in name.lower() or name.lower() in ('cfg', 'args', 'opt', 'opts'):
         return None
 
+    # 파라미터 이름이 nn.Module을 기대할 경우 → CLIP-like 더미 모듈 반환
+    # clip_model, image_encoder, backbone_net 등 어떤 모델이든
+    # _DummyClipLike: encode_text/encode_image + parameters() 지원
+    _lower_name = name.lower()
+    if any(token in _lower_name for token in ('clip', 'vision', 'language', 'text_enc', 'img_enc')):
+        return _DummyClipLike()
+    if any(token in _lower_name for token in ('_model', '_encoder', '_backbone', '_network', '_net', '_module', '_extractor')):
+        return _DummyClipLike()
+    if _lower_name in ('model', 'encoder', 'backbone', 'network', 'net', 'module', 'extractor', 'feature_extractor'):
+        return _DummyClipLike()
+
+    # 텍스트/토큰 시퀀스 배치 파라미터 → 더미 리스트 반환
+    # (ingredient_texts, captions, sentences, queries, token_ids 등)
+    if any(token in _lower_name for token in ('_texts', '_captions', '_sentences', '_queries', '_ingredients', 'ingredient')):
+        return [['dummy text a', 'dummy text b']]
+    if _lower_name in ('texts', 'captions', 'sentences', 'queries', 'ingredients'):
+        return [['dummy text a', 'dummy text b']]
+    if any(token in _lower_name for token in ('token_ids', 'input_ids', 'attention_mask')):
+        return torch.zeros(1, 16, dtype=torch.long)
+
     if model is not None and payload is not None:
         lower = name.lower()
         if any(token in lower for token in ('img', 'image', 'pixel', 'input', 'x', 'sample', 'samples')):
@@ -364,7 +405,14 @@ def infer_forward_inputs(model: nn.Module, payload: dict[str, Any], forced_hw: O
         value = None
         input_strategy = 'synthesized'
 
-        if isinstance(leaf, nn.Embedding) or any(token in lower for token in ('ids', 'tokens', 'input_ids')):
+        # ── 텍스트 리스트 파라미터 감지 (ingredient_texts, captions, sentences 등) ──
+        if any(token in lower for token in ('ingredient', '_texts', 'captions', 'sentences', 'queries', 'prompts')):
+            value = [['dummy ingredient a', 'dummy ingredient b']]
+            input_strategy = 'text-list'
+        elif any(token in lower for token in ('text', 'caption', 'sentence', 'query', 'prompt')) and 'mask' not in lower:
+            value = ['dummy text']
+            input_strategy = 'text-list'
+        elif isinstance(leaf, nn.Embedding) or any(token in lower for token in ('ids', 'tokens', 'input_ids')):
             value = torch.randint(0, int(getattr(leaf, 'num_embeddings', 1000)), (1, 16), dtype=torch.long)
             input_strategy = 'token-sequence'
         elif any(token in lower for token in ('mask', 'attention_mask')):

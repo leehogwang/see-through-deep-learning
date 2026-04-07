@@ -1,0 +1,77 @@
+{
+  "timestamp": "2026-04-07T06-01-07",
+  "summary": {
+    "total": 13,
+    "pass": 13,
+    "fail": 0
+  },
+  "videoPath": "/home/students/cs/202421012/ai/benchmarks/reports/videos/full-e2e-2026-04-07T06-01-07.webm",
+  "screenshotDir": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots",
+  "steps": [
+    {
+      "step": "Step 01: 앱 로드",
+      "status": "PASS",
+      "elapsed_ms": 1139
+    },
+    {
+      "step": "Step 02: 팔레트 검색",
+      "status": "PASS",
+      "elapsed_ms": 421
+    },
+    {
+      "step": "Step 03: 블록 드래그 (Input, Conv2D, BN, ReLU, GlobalAvgPool, Linear, Output)",
+      "status": "PASS",
+      "elapsed_ms": 6598
+    },
+    {
+      "step": "Step 04: 파라미터 편집 (Input.shape, Conv2D.in_ch/out_ch, Linear.in_features)",
+      "status": "PASS",
+      "elapsed_ms": 1589
+    },
+    {
+      "step": "Step 05: 전체 엣지 연결 + Shape propagation (에러 없는 완전한 그래프)",
+      "status": "PASS",
+      "elapsed_ms": 3673
+    },
+    {
+      "step": "Step 06: Shape 에러 감지 (in_ch 불일치)",
+      "status": "PASS",
+      "elapsed_ms": 1124
+    },
+    {
+      "step": "Step 07: Shape 에러 복구 (in_ch 수정)",
+      "status": "PASS",
+      "elapsed_ms": 410
+    },
+    {
+      "step": "Step 08: 노드 삭제 + bypass 엣지 자동 생성",
+      "status": "PASS",
+      "elapsed_ms": 1570
+    },
+    {
+      "step": "Step 09: AI 에이전트 패널 열기 + 쿼리 전송",
+      "status": "PASS",
+      "elapsed_ms": 7711
+    },
+    {
+      "step": "Step 10: replace_node 시각 반영 검증",
+      "status": "PASS",
+      "elapsed_ms": 8008
+    },
+    {
+      "step": "Step 11: PyTorch 코드 생성",
+      "status": "PASS",
+      "elapsed_ms": 1427
+    },
+    {
+      "step": "Step 12: 그래프 진단 패널",
+      "status": "PASS",
+      "elapsed_ms": 633
+    },
+    {
+      "step": "Step 13: 팔레트 카테고리 탐색",
+      "status": "PASS",
+      "elapsed_ms": 35
+    }
+  ]
+}
