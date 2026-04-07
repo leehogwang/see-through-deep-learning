@@ -38,6 +38,7 @@ export const STATIC_CATEGORIES: CategoryDef[] = [
   { id: 'shape',        icon: '🔗', label: 'Shape Ops' },
   { id: 'regularize',   icon: '🛡️', label: 'Regularization' },
   { id: 'linear',       icon: '🔵', label: 'Linear' },
+  { id: 'preprocess',   icon: '🖼️', label: 'Preprocessing' },
 ]
 
 export const CATEGORIES = STATIC_CATEGORIES
@@ -423,6 +424,58 @@ export const STATIC_BLOCKS: BlockDef[] = [
     formula: 'y = x₁Wx₂ + b',
     description: '두 입력 벡터를 결합. 자연어처리의 관계 모델링에 사용됩니다.',
     defaultParams: { in1: 256, in2: 256, out: 128 },
+  },
+
+  // ── Preprocessing (torchvision transforms) ──────────────────
+  {
+    type: 'Resize', label: 'Resize', category: 'preprocess', color: '#14b8a6',
+    description: '이미지를 지정한 크기로 리사이즈합니다.',
+    defaultParams: { size: '(256, 256)', interpolation: 'bilinear' },
+  },
+  {
+    type: 'CenterCrop', label: 'CenterCrop', category: 'preprocess', color: '#14b8a6',
+    description: '이미지 중앙을 지정한 크기로 크롭합니다.',
+    defaultParams: { size: '(224, 224)' },
+  },
+  {
+    type: 'RandomCrop', label: 'RandomCrop', category: 'preprocess', color: '#14b8a6',
+    description: '이미지를 랜덤 위치에서 크롭합니다.',
+    defaultParams: { size: '(224, 224)' },
+  },
+  {
+    type: 'RandomResizedCrop', label: 'RandomResizedCrop', category: 'preprocess', color: '#14b8a6',
+    description: '랜덤 크기/비율로 크롭 후 리사이즈합니다.',
+    defaultParams: { size: '(224, 224)', scale: '(0.08, 1.0)' },
+  },
+  {
+    type: 'RandomHorizontalFlip', label: 'RandomHorizontalFlip', category: 'preprocess', color: '#14b8a6',
+    description: '이미지를 확률적으로 좌우 반전합니다.',
+    defaultParams: { p: 0.5 },
+  },
+  {
+    type: 'ToTensor', label: 'ToTensor', category: 'preprocess', color: '#14b8a6',
+    description: 'PIL Image / numpy array → [0,1] float Tensor로 변환합니다.',
+    defaultParams: {},
+  },
+  {
+    type: 'Normalize', label: 'Normalize', category: 'preprocess', color: '#14b8a6',
+    description: '채널별 mean/std로 정규화합니다. ImageNet: mean=(0.485,0.456,0.406), std=(0.229,0.224,0.225)',
+    defaultParams: { mean: '(0.485, 0.456, 0.406)', std: '(0.229, 0.224, 0.225)' },
+  },
+  {
+    type: 'ColorJitter', label: 'ColorJitter', category: 'preprocess', color: '#14b8a6',
+    description: '밝기/대비/채도/색조를 랜덤하게 변환합니다.',
+    defaultParams: { brightness: 0.2, contrast: 0.2, saturation: 0.2, hue: 0.1 },
+  },
+  {
+    type: 'Grayscale', label: 'Grayscale', category: 'preprocess', color: '#14b8a6',
+    description: '이미지를 그레이스케일로 변환합니다.',
+    defaultParams: { num_output_channels: 1 },
+  },
+  {
+    type: 'DataSampling', label: 'DataSampling', category: 'preprocess', color: '#f59e0b',
+    description: '더미 입력 텐서를 생성합니다 (torch.randn).',
+    defaultParams: { method: 'torch.randn', shape: '(1, 3, 224, 224)' },
   },
 ]
 

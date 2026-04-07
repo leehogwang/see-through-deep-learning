@@ -73,6 +73,110 @@ function makeEdge(source: string, target: string): Edge {
   }
 }
 
+function getNodeCanvasSize(node: Node): { width: number; height: number } {
+  const measured = node as Node & {
+    measured?: { width?: number; height?: number }
+    width?: number
+    height?: number
+  }
+  const data = node.data as LayerNodeData
+  const fallbackWidth = data._isCollapsed ? 220 : 180
+  return {
+    width: measured.measured?.width ?? measured.width ?? fallbackWidth,
+    height: measured.measured?.height ?? measured.height ?? 110,
+  }
+}
+
+function getNodeCenter(node: Node): { x: number; y: number } {
+  const { width, height } = getNodeCanvasSize(node)
+  return {
+    x: node.position.x + width / 2,
+    y: node.position.y + height / 2,
+  }
+}
+
+function distancePointToSegment(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): number {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y)
+  }
+
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)))
+  const projection = {
+    x: start.x + t * dx,
+    y: start.y + t * dy,
+  }
+  return Math.hypot(point.x - projection.x, point.y - projection.y)
+}
+
+function findInsertionEdge(nodes: Node[], edges: Edge[], point: { x: number; y: number }): Edge | null {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+  let closest: { edge: Edge; distance: number } | null = null
+
+  for (const edge of edges) {
+    const sourceNode = nodeMap.get(edge.source)
+    const targetNode = nodeMap.get(edge.target)
+    if (!sourceNode || !targetNode) continue
+
+    const sourceCenter = getNodeCenter(sourceNode)
+    const targetCenter = getNodeCenter(targetNode)
+    const distance = distancePointToSegment(point, sourceCenter, targetCenter)
+    if (distance > 48) continue
+
+    if (!closest || distance < closest.distance) {
+      closest = { edge, distance }
+    }
+  }
+
+  return closest?.edge ?? null
+}
+
+function spliceEdgeWithNode(edges: Edge[], edgeToReplace: Edge, newNodeId: string): Edge[] {
+  const remainingEdges = edges.filter((edge) => edge.id !== edgeToReplace.id)
+  return dedupeEdges([
+    ...remainingEdges,
+    makeEdge(edgeToReplace.source, newNodeId),
+    makeEdge(newNodeId, edgeToReplace.target),
+  ])
+}
+
+function computeFlowReachableNodeIds(nodes: Node[], edges: Edge[]): Set<string> {
+  const incoming = new Map<string, number>()
+  const adjacency = new Map<string, string[]>()
+
+  for (const node of nodes) {
+    incoming.set(node.id, 0)
+    adjacency.set(node.id, [])
+  }
+
+  for (const edge of edges) {
+    incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1)
+    adjacency.set(edge.source, [...(adjacency.get(edge.source) ?? []), edge.target])
+  }
+
+  const queue = nodes
+    .filter((node) => (incoming.get(node.id) ?? 0) === 0)
+    .map((node) => node.id)
+  const reachable = new Set<string>(queue)
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current) break
+    for (const next of adjacency.get(current) ?? []) {
+      if (reachable.has(next)) continue
+      reachable.add(next)
+      queue.push(next)
+    }
+  }
+
+  return reachable
+}
+
 function parseLockedShape(outputShape?: string): Shape | null {
   if (!outputShape) return null
   const normalized = outputShape.replace(/[()[\]]/g, '').trim()
@@ -1015,6 +1119,7 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
       return [n.id, { shape: nd.outputShape, hasData: !!preview, tensorSample }]
     })
   )
+  const flowReachableNodeIds = computeFlowReachableNodeIds(nodes, edges)
 
   const renderedNodes = decorateNodesWithDiagnostics(nodes, diagnostics).map((node) => ({
     ...node,
@@ -1032,12 +1137,13 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   // 엣지에 데이터 흐름 정보 장식 (source 노드의 shape, hasData)
   const renderedEdges = edges.map(edge => {
     const src = nodeShapeMap.get(edge.source)
+    const hasReachableFlow = flowReachableNodeIds.has(edge.source) && flowReachableNodeIds.has(edge.target)
     return {
       ...edge,
       type: 'flowEdge',
       data: {
         ...((edge.data as object | undefined) ?? {}),
-        hasData: src?.hasData ?? false,
+        hasData: (src?.hasData ?? false) || hasReachableFlow,
         shapeLabel: src?.shape ?? undefined,
         tensorSample: src?.tensorSample ?? undefined,
       },
@@ -1150,17 +1256,39 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     if (!blockType) return
     if (!getBlockDef(blockType)) return
 
+    const instance = rfInstanceRef.current as unknown as {
+      screenToFlowPosition?: (position: { x: number; y: number }) => { x: number; y: number }
+    } | null
     const bounds = reactFlowWrapper.current?.getBoundingClientRect()
     if (!bounds) return
 
+    const flowPosition = instance?.screenToFlowPosition
+      ? instance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      : {
+          x: event.clientX - bounds.left,
+          y: event.clientY - bounds.top,
+        }
+
     const position = {
-      x: event.clientX - bounds.left - 70,
-      y: event.clientY - bounds.top - 30,
+      x: flowPosition.x - 70,
+      y: flowPosition.y - 30,
     }
 
     const newNode = createNodeFromBlock(blockType, nodesRef.current, undefined, position, nodesRef.current.length)
     if (!newNode) return
-    commitGraph([...nodesRef.current, newNode], edgesRef.current)
+
+    const insertionEdge = findInsertionEdge(nodesRef.current, edgesRef.current, flowPosition)
+    const nextEdges = insertionEdge
+      ? spliceEdgeWithNode(edgesRef.current, insertionEdge, newNode.id)
+      : edgesRef.current
+
+    commitGraph([...nodesRef.current, newNode], nextEdges)
+    if (insertionEdge) {
+      setSurfaceStatus({
+        level: 'success',
+        message: `Inserted ${blockType} between ${insertionEdge.source} and ${insertionEdge.target}.`,
+      })
+    }
   }, [commitGraph])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {

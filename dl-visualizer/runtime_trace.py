@@ -22,6 +22,244 @@ def to_json(data):
     print(json.dumps(data))
 
 
+# ── 전처리 transform 자동 감지 ────────────────────────────────────────────────
+
+def _discover_transforms(model: nn.Module, payload: dict[str, Any]):
+    """
+    모델 또는 로딩 컨텍스트에서 입력 전처리 파이프라인을 자동으로 감지한다.
+    감지 순서:
+    1. model.transform / model.preprocess / model.transforms 속성
+    2. timm: timm.data.create_transform(model.default_cfg)
+    3. torchvision: weights 객체의 transforms()
+    4. 모델의 첫 Conv 레이어의 in_channels/kernel_size로부터 표준 전처리 추론
+    반환: list of transform-step dicts (없으면 [])
+    """
+    steps = []
+
+    # ── 1. 모델 속성에서 transform 탐색 ──────────────────────────────────────
+    for attr in ('transform', 'preprocess', 'transforms', '_transform', '_preprocess'):
+        t = getattr(model, attr, None)
+        if t is not None:
+            steps = _parse_compose(t)
+            if steps:
+                return steps
+
+    # ── 2. timm default_cfg ───────────────────────────────────────────────────
+    try:
+        import timm
+        cfg = getattr(model, 'default_cfg', None) or getattr(model, 'pretrained_cfg', None)
+        if cfg is not None:
+            from timm.data import create_transform
+            input_size = cfg.get('input_size', (3, 224, 224))
+            h, w = int(input_size[1]), int(input_size[2])
+            mean = cfg.get('mean', (0.485, 0.456, 0.406))
+            std  = cfg.get('std',  (0.229, 0.224, 0.225))
+            crop_pct = float(cfg.get('crop_pct', 0.875))
+            steps = [
+                _make_step('Resize', f'({int(h / crop_pct)}, {int(w / crop_pct)})', {'size': f'({int(h / crop_pct)}, {int(w / crop_pct)})', 'interpolation': 'bilinear'}, 'pretrained_cfg'),
+                _make_step('CenterCrop', f'({h}, {w})',                             {'size': f'({h}, {w})'},                                                                    'pretrained_cfg'),
+                _make_step('ToTensor', '', {},                                      'pretrained_cfg'),
+                _make_step('Normalize', f'mean={mean}',                             {'mean': str(mean), 'std': str(std)},                                                       'pretrained_cfg'),
+            ]
+            return steps
+    except Exception:
+        pass
+
+    # ── 3. torchvision weights API ────────────────────────────────────────────
+    try:
+        import torchvision.models as tvm
+        class_name = model.__class__.__name__
+        for attr_name in dir(tvm):
+            if not attr_name.endswith('_Weights'):
+                continue
+            weights_cls = getattr(tvm, attr_name)
+            if not hasattr(weights_cls, 'DEFAULT'):
+                continue
+            if class_name.lower() not in attr_name.lower():
+                continue
+            try:
+                t = weights_cls.DEFAULT.transforms()
+                parsed = _parse_compose(t)
+                if parsed:
+                    return parsed
+                # ImageClassification 같은 단일 nn.Module transform 처리
+                parsed = _parse_image_classification_transform(t)
+                if parsed:
+                    return parsed
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # ── 4. 첫 Conv 레이어로부터 표준 전처리 추론 ──────────────────────────────
+    for _, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Conv3d)):
+            in_ch = int(getattr(module, 'in_channels', 3))
+            # 입력 크기 후보: model.image_size 또는 기본 224
+            image_size = getattr(model, 'image_size', 224)
+            if isinstance(image_size, (tuple, list)):
+                h, w = int(image_size[0]), int(image_size[1])
+            else:
+                h = w = int(image_size)
+            crop_h = int(round(h / 0.875))
+            crop_w = int(round(w / 0.875))
+            mean = (0.485, 0.456, 0.406) if in_ch == 3 else (0.5,)
+            std  = (0.229, 0.224, 0.225) if in_ch == 3 else (0.5,)
+            steps = [
+                _make_step('Resize', f'({crop_h}, {crop_w})', {'size': f'({crop_h}, {crop_w})', 'interpolation': 'bilinear'}, 'inferred'),
+                _make_step('CenterCrop', f'({h}, {w})',        {'size': f'({h}, {w})'},                                        'inferred'),
+                _make_step('ToTensor', '',                     {},                                                              'inferred'),
+                _make_step('Normalize', f'mean={mean}',        {'mean': str(mean), 'std': str(std)},                            'inferred'),
+            ]
+            return steps
+        break  # 첫 번째 Conv만 확인
+
+    return []
+
+
+def _make_step(class_name: str, label_suffix: str, params: dict, source: str) -> dict:
+    label = class_name + (f' {label_suffix}' if label_suffix else '')
+    return {
+        'id': f'preproc_{class_name.lower()}',
+        'kind': 'module',
+        'label': class_name,
+        'block_type': class_name,
+        'attr': class_name.lower(),
+        'attr_path': f'preprocess.{class_name.lower()}',
+        'module_class': class_name,
+        'params': params,
+        'source': source,
+        'output_shape': '',
+    }
+
+
+def _parse_image_classification_transform(t: Any) -> list[dict]:
+    """
+    torchvision ImageClassification / VisionTransform 같이
+    resize_size, crop_size, mean, std 속성을 직접 갖는 단일 transform 객체 처리.
+    """
+    resize = getattr(t, 'resize_size', None)
+    crop   = getattr(t, 'crop_size', None)
+    mean   = getattr(t, 'mean', None)
+    std    = getattr(t, 'std', None)
+    interp = getattr(t, 'interpolation', None)
+
+    if resize is None and crop is None:
+        return []
+
+    steps = []
+    if resize is not None:
+        r = list(resize) if hasattr(resize, '__iter__') else [resize, resize]
+        steps.append(_make_step(
+            'Resize', f'({r[0]}, {r[0]})',
+            {'size': f'({r[0]}, {r[0]})', 'interpolation': str(interp) if interp else 'bilinear'},
+            'weights-api',
+        ))
+    if crop is not None:
+        c = list(crop) if hasattr(crop, '__iter__') else [crop, crop]
+        steps.append(_make_step(
+            'CenterCrop', f'({c[0]}, {c[0]})',
+            {'size': f'({c[0]}, {c[0]})'},
+            'weights-api',
+        ))
+    steps.append(_make_step('ToTensor', '', {}, 'weights-api'))
+    if mean is not None and std is not None:
+        m = tuple(float(v) for v in mean) if hasattr(mean, '__iter__') else (float(mean),)
+        s = tuple(float(v) for v in std)  if hasattr(std, '__iter__')  else (float(std),)
+        steps.append(_make_step(
+            'Normalize', f'mean={m}',
+            {'mean': str(m), 'std': str(s)},
+            'weights-api',
+        ))
+    return steps
+
+
+def _parse_compose(t: Any) -> list[dict]:
+    """torchvision Compose / nn.Sequential 을 step 리스트로 변환한다."""
+    transforms_list = None
+    if hasattr(t, 'transforms'):          # torchvision.transforms.Compose
+        transforms_list = t.transforms
+    elif hasattr(t, 'children'):          # nn.Sequential
+        transforms_list = list(t.children())
+    if not transforms_list:
+        return []
+    steps = []
+    for step in transforms_list:
+        class_name = step.__class__.__name__
+        params = {}
+        for attr in ('size', 'mean', 'std', 'scale', 'ratio', 'p', 'interpolation', 'antialias'):
+            val = getattr(step, attr, None)
+            if val is not None:
+                params[attr] = str(val)
+        steps.append(_make_step(class_name, '', params, 'model-attr'))
+    return steps
+
+
+def _prepend_preprocess_ops(
+    ops: list[dict],
+    preprocess_steps: list[dict],
+    forward_inputs: list[dict],
+    h: int = 224,
+    w: int = 224,
+    channels: int = 3,
+    include_data_sampling: bool = True,
+) -> list[dict]:
+    """
+    forward_graph ops 앞에 DataSampling + 전처리 step들을 삽입한다.
+    Input(t0) → DataSampling(synth_raw_t) → [Resize → ... →] 첫 모델 레이어
+    """
+    if not ops:
+        return ops
+
+    if not forward_inputs:
+        return ops
+    input_token = forward_inputs[0]['token']  # e.g. 't0'
+
+    prep_prefix: list[dict] = []
+    prev_token = input_token
+
+    if include_data_sampling:
+        synth_token = 'synth_raw_t'
+        data_sampling_op = {
+            'id': 'op_data_sampling',
+            'block_type': 'DataSampling',
+            'label': 'DataSampling',
+            'attr_path': 'preprocess.data_sampling',
+            'kind': 'module',
+            'params': {
+                'method': 'torch.randn',
+                'shape': f'(1, {channels}, {h}, {w})',
+            },
+            'inputs': [{'token': input_token, 'label': 'seed', 'strategy': 'chain'}],
+            'output': {'token': synth_token, 'label': 'DataSampling', 'shape': f'[1, {channels}, {h}, {w}]'},
+            'output_shape': f'[1, {channels}, {h}, {w}]',
+        }
+        prep_prefix.append(data_sampling_op)
+        prev_token = synth_token
+
+    # 전처리 체인: Input 또는 DataSampling 출력 → Resize → ... → final_token
+    prep_ops: list[dict] = []
+    for i, step in enumerate(preprocess_steps):
+        new_token = f'preproc_t{i}'
+        op = dict(step)
+        op['id'] = f'op_preproc_{i}'
+        op['inputs'] = [{'token': prev_token, 'label': step['label'], 'strategy': 'chain'}]
+        op['output'] = {'token': new_token, 'label': step['label'], 'shape': ''}
+        op['output_shape'] = ''
+        prep_ops.append(op)
+        prev_token = new_token
+
+    final_token = prev_token  # 전처리 마지막 or synth_raw_t (전처리 없을 때)
+
+    # 모든 ops에서 input_token을 참조하는 inputs를 final_token으로 교체
+    for op in ops:
+        for inp in op.get('inputs', []):
+            if inp['token'] == input_token:
+                inp['token'] = final_token
+
+    return prep_prefix + prep_ops + ops
+
+
 def normalize_block_type(module_class: str, fallback: Optional[str] = None):
     if fallback:
         return fallback
@@ -64,14 +302,20 @@ class _DummyClipLike(nn.Module):
 
     def encode_text(self, text_tokens):
         b = text_tokens.shape[0] if hasattr(text_tokens, 'shape') else 1
-        return torch.randn(b, self._clip_dim, device=self._dummy_param.device)
+        if not hasattr(text_tokens, 'float'):
+            return torch.zeros(b, self._clip_dim, device=self._dummy_param.device)
+        token_features = text_tokens.float().mean(dim=1, keepdim=True)
+        return token_features.repeat(1, self._clip_dim)
 
     def encode_image(self, images):
         b = images.shape[0] if hasattr(images, 'shape') else 1
-        return torch.randn(b, self._clip_dim, device=self._dummy_param.device)
+        if not hasattr(images, 'float'):
+            return torch.zeros(b, self._clip_dim, device=self._dummy_param.device)
+        image_features = images.float().mean(dim=tuple(range(1, images.dim())), keepdim=False).view(b, 1)
+        return image_features.repeat(1, self._clip_dim)
 
     def forward(self, *args, **kwargs):
-        return self.encode_image(args[0]) if args else torch.randn(1, self._clip_dim)
+        return self.encode_image(args[0]) if args else torch.zeros(1, self._clip_dim, device=self._dummy_param.device)
 
 
 def flatten_tensor_tree(value: Any, prefix: str = '') -> list[tuple[str, torch.Tensor]]:
@@ -151,6 +395,13 @@ def image_hw_from_payload(payload: dict[str, Any], model: nn.Module, forced_hw: 
     if width > 0 and height > 0:
         return height, width
     return 224, 224
+
+
+def _get_input_channels(model: nn.Module) -> int:
+    _, leaf = first_input_seed_module(model)
+    if isinstance(leaf, (nn.Conv2d, nn.Conv3d, nn.Conv1d)):
+        return int(getattr(leaf, 'in_channels', 3))
+    return 3
 
 
 def synth_scalar_for_name(name: str) -> Any:
@@ -770,7 +1021,14 @@ def trace_model(payload: dict[str, Any]):
             'layers': [],
             'forward_order': [],
             'forward_inputs': collector.forward_inputs,
-            'forward_graph': collector.ops,
+            'forward_graph': _prepend_preprocess_ops(
+                collector.ops,
+                _discover_transforms(model, payload),
+                collector.forward_inputs,
+                *image_hw_from_payload(payload, model),
+                _get_input_channels(model),
+                not any(ref.get('strategy') == 'sample-image' for ref in input_meta),
+            ),
             'return_outputs': collector.return_outputs,
         },
     }

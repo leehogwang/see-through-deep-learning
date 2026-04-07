@@ -14,6 +14,7 @@ const REPORT_PATH = path.join(BENCHMARKS_ROOT, 'reports', 'latest.json')
 const RUNTIME_TRACE_PATH = path.join(__dirname, 'runtime_trace.py')
 const TRACE_LAYER_DATA_PATH = path.join(__dirname, 'trace_layer_data.py')
 const TORCH_BLOCK_CATALOG_PATH = path.join(__dirname, 'torch_block_catalog.py')
+const SAMPLE_DISCOVERY_PATH = path.join(__dirname, 'sample_discovery.py')
 
 const app = express()
 const PORT = 5173
@@ -220,7 +221,22 @@ function traceRuntimeModel(payload) {
   return runSandboxedPython(RUNTIME_TRACE_PATH, payload, payload.repoRoot)
 }
 
-function buildSamplePreview(benchmark, repoDir, candidatePath, source, strategy) {
+function discoverSamplePreview(benchmark, repoDir, sourceFile) {
+  try {
+    const result = runSandboxedPython(SAMPLE_DISCOVERY_PATH, {
+      repoRoot: repoDir,
+      sourceFile,
+      benchmarkId: benchmark.id,
+      modelName: benchmark.model_name,
+    }, repoDir)
+    if (!result?.success || !result.resolvedPath || !fs.existsSync(result.resolvedPath)) return null
+    return result
+  } catch {
+    return null
+  }
+}
+
+function buildSamplePreview(benchmark, repoDir, candidatePath, source, strategy, datasetEvidence = '') {
   const sample = benchmark.sample_preview || {}
   const metadata = readImageMetadata(candidatePath)
   const relativePath = source === 'repo'
@@ -235,15 +251,29 @@ function buildSamplePreview(benchmark, repoDir, candidatePath, source, strategy)
     source,
     strategy,
     caption: sample.caption || '',
-    datasetEvidence: source === 'repo'
+    datasetEvidence: datasetEvidence || (source === 'repo'
       ? `Resolved from the benchmark repository at ${relativePath}.`
-      : `Repository sample was not available, so a curated ${benchmark.task} fallback asset is shown.`,
+      : `Repository sample was not available, so a curated ${benchmark.task} fallback asset is shown.`),
     ...metadata,
   }
 }
 
-function resolveSamplePreview(benchmark, repoDir) {
+function resolveSamplePreview(benchmark, repoDir, sourceFile = null) {
   const sample = benchmark.sample_preview || {}
+  if (sourceFile && fs.existsSync(sourceFile)) {
+    const discovered = discoverSamplePreview(benchmark, repoDir, sourceFile)
+    if (discovered) {
+      return buildSamplePreview(
+        benchmark,
+        repoDir,
+        discovered.resolvedPath,
+        discovered.source || 'dataset',
+        discovered.strategy || 'dataset-first-sample',
+        discovered.evidence || 'Resolved by constructing the dataset and reading its first sample path.',
+      )
+    }
+  }
+
   const repoPaths = sample.repo_paths || []
 
   for (const relPath of repoPaths) {
@@ -340,7 +370,7 @@ function loadBenchmarkPayload(id) {
   if (!fs.existsSync(sourceFile)) {
     throw new Error(`Benchmark entry file not found: ${sourceFile}`)
   }
-  const samplePreview = resolveSamplePreview(benchmark, repoDir)
+  const samplePreview = resolveSamplePreview(benchmark, repoDir, sourceFile)
   return loadModelPayload(sourceFile, benchmark.model_name, {
     ...benchmark,
     available: true,
@@ -815,7 +845,7 @@ function buildAgentExecArgs(binaryPath, outputPath, prompt) {
     '--sandbox',
     'read-only',
     '-m',
-    'gpt-5.4-mini',
+    'gpt-5.1',
     '-c',
     'model_reasoning_effort="low"',
     '-c',
@@ -1104,7 +1134,8 @@ app.get('/api/sample-asset', (req, res) => {
 
   try {
     const { benchmark, repoDir } = resolveBenchmark(benchmarkId)
-    const preview = resolveSamplePreview(benchmark, repoDir)
+    const sourceFile = path.join(repoDir, benchmark.entry_file)
+    const preview = resolveSamplePreview(benchmark, repoDir, sourceFile)
     if (!preview.resolvedPath || !fs.existsSync(preview.resolvedPath)) {
       return res.status(404).json({ error: 'sample preview not found' })
     }

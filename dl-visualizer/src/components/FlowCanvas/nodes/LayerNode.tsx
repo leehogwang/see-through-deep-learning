@@ -176,17 +176,17 @@ export default function LayerNode({ id, data, selected }: NodeProps) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={{
               fontSize: 12,
-              fontWeight: 600,
+              fontWeight: 700,
               color: '#f1f5f9',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
               display: 'block',
             }}>
-              {d._attrName && d._attrName !== headerLabel ? d._attrName : headerLabel}
+              {headerLabel}
             </span>
             {d._attrName && d._attrName !== headerLabel && (
-              <span style={{ fontSize: 9, color: '#64748b', display: 'block' }}>{headerLabel}</span>
+              <span style={{ fontSize: 9, color: '#94a3b8', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d._attrName}</span>
             )}
           </div>
           {isCustom && (

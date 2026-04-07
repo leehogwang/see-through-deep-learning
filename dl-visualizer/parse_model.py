@@ -36,6 +36,18 @@ NN_TYPE_MAP = {
     'TransformerEncoderLayer': 'TransformerEncoderLayer',
     'TransformerDecoderLayer': 'TransformerDecoderLayer',
     'Parameter': None,  # skip
+    # ── 전처리 transforms (torchvision / timm / 추론) ────────────────────────
+    'Resize': 'Resize',
+    'CenterCrop': 'CenterCrop',
+    'RandomCrop': 'RandomCrop',
+    'RandomHorizontalFlip': 'RandomHorizontalFlip',
+    'RandomResizedCrop': 'RandomResizedCrop',
+    'ToTensor': 'ToTensor',
+    'Normalize': 'Normalize',
+    'ColorJitter': 'ColorJitter',
+    'Grayscale': 'Grayscale',
+    'DataSampling': 'DataSampling',
+    'Compose': None,  # skip — 내부 step들로 대체됨
 }
 
 FUNC_BLOCK_MAP = {
