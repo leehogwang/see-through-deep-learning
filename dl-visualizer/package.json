@@ -8,7 +8,15 @@
     "build": "tsc -b && vite build",
     "start": "node server.js",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:edit-flow": "node scripts/test-edit-flow.mjs",
+    "test:agent-panel": "node scripts/test-agent-panel.mjs",
+    "test:agent-matrix": "node scripts/test-agent-matrix.mjs",
+    "test:canvas-e2e": "node scripts/test-canvas-e2e.mjs",
+    "benchmarks:fetch": "node scripts/fetch-benchmarks.mjs",
+    "benchmarks:run": "node scripts/run-benchmarks.mjs",
+    "benchmarks:ui": "node scripts/run-ui-mismatch-benchmarks.mjs",
+    "verify:service": "npm run test:edit-flow && npm run test:agent-panel && npm run test:agent-matrix && npm run test:canvas-e2e && npm run benchmarks:ui"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
@@ -19,7 +27,8 @@
     "playwright": "^1.59.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwindcss": "^4.2.2"
+    "tailwindcss": "^4.2.2",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

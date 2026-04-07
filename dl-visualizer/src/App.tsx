@@ -1,30 +1,39 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AgentPanel from './components/AgentPanel/AgentPanel'
-import FlowCanvas from './components/FlowCanvas/FlowCanvas'
+import FlowCanvas, { type FlowCanvasHandle } from './components/FlowCanvas/FlowCanvas'
 import BlockPalette from './components/BlockPalette/BlockPalette'
 import ScanModal from './components/ScanModal/ScanModal'
-import type { ParsedModel, GitInfo } from './lib/api'
-
-interface LoadedModel {
-  model: ParsedModel
-  sourceFile: string
-  gitInfo: GitInfo
-  registry: Record<string, ParsedModel>
-}
+import { getBlockCatalog, type AgentCanvasAction, type AgentGraphSnapshot, type LoadedModelPayload } from './lib/api'
+import { setDynamicBlocks } from './data/blocks'
 
 export default function App() {
   const [selectedBlockType, setSelectedBlockType] = useState<string | null>(null)
   const [showScan, setShowScan] = useState(false)
-  const [loadedModel, setLoadedModel] = useState<LoadedModel | null>(null)
+  const [loadedModel, setLoadedModel] = useState<LoadedModelPayload | null>(null)
   const [worktreeNotice, setWorktreeNotice] = useState('')
+  const [catalogVersion, setCatalogVersion] = useState(0)
+  const [graphSnapshot, setGraphSnapshot] = useState<AgentGraphSnapshot>({ nodes: [], edges: [] })
+  const flowCanvasRef = useRef<FlowCanvasHandle | null>(null)
 
-  const handleLoad = (
-    model: ParsedModel,
-    sourceFile: string,
-    gitInfo: GitInfo,
-    registry: Record<string, ParsedModel>,
-  ) => {
-    setLoadedModel({ model, sourceFile, gitInfo, registry })
+  useEffect(() => {
+    let cancelled = false
+    getBlockCatalog()
+      .then((blocks) => {
+        if (cancelled) return
+        setDynamicBlocks(blocks)
+        setCatalogVersion((current) => current + 1)
+      })
+      .catch((error) => {
+        console.error('Failed to load dynamic torch.nn block catalog', error)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleLoad = (payload: LoadedModelPayload) => {
+    setLoadedModel(payload)
     setShowScan(false)
     setWorktreeNotice('')
   }
@@ -32,6 +41,17 @@ export default function App() {
   const registrySize = loadedModel
     ? Object.keys(loadedModel.registry).length
     : 0
+
+  const executeAgentActions = async (actions: AgentCanvasAction[]) => {
+    if (!flowCanvasRef.current) {
+      return {
+        applied: 0,
+        warnings: ['Canvas is not ready yet.'],
+        snapshot: graphSnapshot,
+      }
+    }
+    return flowCanvasRef.current.executeAgentActions(actions)
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -57,7 +77,8 @@ export default function App() {
         <div style={{ flex: 1 }} />
         {loadedModel && (
           <span style={{ fontSize: 10, color: '#475569' }}>
-            registry: {registrySize} classes
+            {loadedModel.benchmark?.label ? `${loadedModel.benchmark.label} · ` : ''}
+            {registrySize > 0 ? `registry: ${registrySize} classes` : 'runtime-first load'}
           </span>
         )}
       </div>
@@ -65,13 +86,21 @@ export default function App() {
       {/* Main 3-panel */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <div style={{ width: 280, flexShrink: 0, height: '100%' }}>
-          <AgentPanel selectedBlockType={selectedBlockType} />
+          <AgentPanel
+            selectedBlockType={selectedBlockType}
+            graphSnapshot={graphSnapshot}
+            loadedModel={loadedModel}
+            onExecuteActions={executeAgentActions}
+          />
         </div>
 
         <div style={{ flex: 1, height: '100%', position: 'relative' }}>
           <FlowCanvas
+            ref={flowCanvasRef}
+            catalogVersion={catalogVersion}
             onNodeSelect={setSelectedBlockType}
             loadedModel={loadedModel}
+            onGraphSnapshotChange={setGraphSnapshot}
             onWorktreeSaved={(path, branch) =>
               setWorktreeNotice(`✓ Saved to worktree: ${branch} (${path})`)
             }

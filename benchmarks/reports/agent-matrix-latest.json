@@ -1,0 +1,51 @@
+{
+  "generatedAt": "2026-04-07T03:42:59.471Z",
+  "passed": true,
+  "cases": [
+    {
+      "id": "question_only",
+      "passed": true,
+      "answerContainsGELU": true,
+      "nodeCount": 0
+    },
+    {
+      "id": "build_chain",
+      "passed": true,
+      "nodeCount": 4,
+      "edgeCount": 3,
+      "warnings": 0,
+      "agentEditedCount": 4
+    },
+    {
+      "id": "param_update",
+      "passed": true,
+      "convTexts": [
+        "Conv2D↗×in_ch1out_ch24kernel3stride1padding1→ (B, 24, 224, 224)",
+        "Conv2D↗×in_ch24out_ch32kernel3stride1padding1→ (B, 32, 224, 224)"
+      ],
+      "agentEditedCount": 4
+    },
+    {
+      "id": "replace_activation",
+      "passed": true,
+      "texts": [
+        "Input↗×shapeB, 1, 224, 224→ (B, 1, 224, 224)",
+        "Conv2D↗×in_ch1out_ch24kernel3stride1padding1→ (B, 24, 224, 224)",
+        "LeakyReLU↗×alpha0.15→ (B, 24, 224, 224)",
+        "Conv2D↗×in_ch24out_ch32kernel3stride1padding1→ (B, 32, 224, 224)"
+      ]
+    },
+    {
+      "id": "delete_and_reconnect",
+      "passed": true,
+      "nodeCount": 3,
+      "edgeCount": 2
+    },
+    {
+      "id": "clear_canvas",
+      "passed": true,
+      "nodeCount": 0
+    }
+  ],
+  "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/agent-matrix-check.png"
+}

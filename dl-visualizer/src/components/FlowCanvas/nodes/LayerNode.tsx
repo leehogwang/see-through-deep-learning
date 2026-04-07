@@ -1,26 +1,42 @@
-import { Handle, Position, NodeProps } from '@xyflow/react'
-import { BLOCK_MAP } from '../../../data/blocks'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { getBlockDef, inferParamMeta, type ParamValue } from '../../../data/blocks'
 import { CUSTOM_MODULE_TYPE } from '../../../lib/modelToGraph'
 
 export interface LayerNodeData {
   blockType: string
-  params: Record<string, string | number>
+  params: Record<string, ParamValue>
   outputShape?: string
   shapeError?: boolean
+  diagnosticSeverity?: 'error' | 'warning' | 'info'
+  diagnosticReason?: string
+  diagnosticCode?: string
   _customClassName?: string
   _attrName?: string
-  _groupName?: string    // parent sub-module attr name (e.g. 'nutrition_head')
-  _groupColor?: string   // accent color for this group
+  _groupName?: string
+  _groupColor?: string
   _isTopLevel?: boolean
   _isCollapsed?: boolean
   _subgraphSize?: number
+  _isUtility?: boolean
+  _expectedTerminal?: boolean
+  _attrPath?: string
+  _usesSelfState?: boolean
+  _runtimeShapeLocked?: boolean
+  _editedByAgent?: boolean
+  _canDelete?: boolean
+  _onDelete?: (nodeId: string) => void
+  _canStartConnect?: boolean
+  _onStartConnect?: (nodeId: string) => void
+  _onUpdateParam?: (nodeId: string, key: string, value: ParamValue) => void
+  _isPendingConnectSource?: boolean
   [key: string]: unknown
 }
 
-export default function LayerNode({ data, selected }: NodeProps) {
+export default function LayerNode({ id, data, selected }: NodeProps) {
   const d = data as LayerNodeData
   const isCustom = d.blockType === CUSTOM_MODULE_TYPE
-  const def = isCustom ? null : BLOCK_MAP[d.blockType]
+  const def = isCustom ? null : getBlockDef(d.blockType)
 
   const accentColor = d._groupColor
     ?? (isCustom ? colorForName(d._customClassName ?? d.blockType) : (def?.color ?? '#6366f1'))
@@ -32,110 +48,231 @@ export default function LayerNode({ data, selected }: NodeProps) {
   const shapeError = !!d.shapeError
   const hasShape = !!d.outputShape
   const isIO = !isCustom && def?.category === 'io'
-  const borderColor = shapeError ? '#ef4444' : selected ? '#818cf8' : '#2a3347'
+  const diagnosticSeverity = d.diagnosticSeverity
+  const borderColor = diagnosticSeverity === 'error'
+    ? '#ef4444'
+    : diagnosticSeverity === 'warning'
+      ? '#f59e0b'
+      : diagnosticSeverity === 'info'
+        ? '#38bdf8'
+        : selected
+          ? '#818cf8'
+          : '#2a3347'
   const isCollapsedModule = isCustom && !!d._isCollapsed
+  const isAgentEdited = !!d._editedByAgent
+  const agentRingStyle: CSSProperties = isAgentEdited
+    ? {
+        padding: 1.5,
+        borderRadius: 12,
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0.16) 36%, rgba(255,255,255,0.58) 72%, rgba(255,255,255,0.1) 100%)',
+        boxShadow: selected
+          ? '0 0 0 2px #818cf844, 0 0 18px rgba(255,255,255,0.22)'
+          : '0 0 18px rgba(255,255,255,0.12)',
+        transition: 'box-shadow 0.15s',
+      }
+    : {
+        borderRadius: 10,
+        boxShadow: selected ? '0 0 0 2px #818cf844' : 'none',
+        transition: 'box-shadow 0.15s',
+      }
 
   return (
-    <div style={{
-      minWidth: isCollapsedModule ? 220 : 160,
-      borderRadius: 10,
-      border: `1.5px solid ${borderColor}`,
-      background: '#1a2035',
-      boxShadow: selected ? '0 0 0 2px #818cf844' : 'none',
-      transition: 'border-color 0.15s',
-      overflow: 'hidden',
-    }}>
-      {/* Group label banner — shown when inside a sub-module */}
-      {d._groupName && (
-        <div style={{
-          padding: '2px 10px',
-          background: `${d._groupColor ?? '#818cf8'}18`,
-          borderBottom: `1px solid ${d._groupColor ?? '#818cf8'}33`,
-          display: 'flex', alignItems: 'center', gap: 4,
-        }}>
-          <div style={{ width: 5, height: 5, borderRadius: '50%', background: d._groupColor ?? '#818cf8', flexShrink: 0 }} />
-          <span style={{ fontSize: 9, color: d._groupColor ?? '#94a3b8', fontFamily: 'monospace', opacity: 0.9 }}>
-            {d._groupName}
-          </span>
-        </div>
-      )}
-
-      {/* Header */}
-      <div style={{
-        padding: '6px 10px',
-        display: 'flex', alignItems: 'center', gap: 6,
-        background: `${accentColor}22`,
-        borderBottom: `1px solid ${accentColor}44`,
-      }}>
-        <div style={{ width: 8, height: 8, borderRadius: '50%', background: accentColor, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{
-            fontSize: 12, fontWeight: 600, color: '#f1f5f9',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block',
-          }}>
-            {d._attrName && d._attrName !== headerLabel ? d._attrName : headerLabel}
-          </span>
-          {/* Show class type as subtitle when attr name differs */}
-          {d._attrName && d._attrName !== headerLabel && (
-            <span style={{ fontSize: 9, color: '#64748b', display: 'block' }}>{headerLabel}</span>
-          )}
-        </div>
-        {isCustom && (
-          <span style={{
-            fontSize: 8, padding: '1px 4px', borderRadius: 3,
-            background: `${accentColor}28`, color: accentColor, border: `1px solid ${accentColor}44`,
-            flexShrink: 0,
-          }}>mod</span>
-        )}
-      </div>
-
-      {/* Body */}
-      <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {Object.entries(d.params)
-          .filter(([k]) => k !== 'class')
-          .map(([k, v]) => (
-            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontSize: 10, color: '#64748b' }}>{k}</span>
-              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#cbd5e1', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {String(v)}
-              </span>
-            </div>
-          ))}
-        {isCollapsedModule && (
+    <div
+      data-testid={`node-${id}`}
+      data-diagnostic-severity={diagnosticSeverity ?? 'none'}
+      data-diagnostic-code={d.diagnosticCode ?? 'none'}
+      data-agent-edited={isAgentEdited ? 'true' : 'false'}
+      style={{
+        minWidth: isCollapsedModule ? 220 : 180,
+        ...agentRingStyle,
+      }}
+      title={d.diagnosticReason ?? undefined}
+    >
+      <div
+        style={{
+          borderRadius: 10,
+          border: `1.5px solid ${borderColor}`,
+          background: '#1a2035',
+          transition: 'border-color 0.15s',
+          overflow: 'hidden',
+        }}
+      >
+        {d._groupName && (
           <div style={{
-            marginTop: 4,
-            padding: '6px 8px',
-            borderRadius: 8,
-            background: `${accentColor}14`,
-            border: `1px solid ${accentColor}33`,
+            padding: '2px 10px',
+            background: `${d._groupColor ?? '#818cf8'}18`,
+            borderBottom: `1px solid ${d._groupColor ?? '#818cf8'}33`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
           }}>
-            <div style={{ fontSize: 10, color: '#cbd5e1', fontWeight: 600 }}>
-              internals hidden
-            </div>
-            <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>
-              {typeof d._subgraphSize === 'number' && d._subgraphSize > 0
-                ? `${d._subgraphSize} traced ops available in expanded view`
-                : 'switch to expanded view to inspect sub-ops'}
-            </div>
-          </div>
-        )}
-        {hasShape && (
-          <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #1e2535', textAlign: 'center' }}>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', color: shapeError ? '#f87171' : '#34d399' }}>
-              {shapeError ? '⚠ check connection' : `→ ${d.outputShape}`}
+            <div style={{ width: 5, height: 5, borderRadius: '50%', background: d._groupColor ?? '#818cf8', flexShrink: 0 }} />
+            <span style={{ fontSize: 9, color: d._groupColor ?? '#94a3b8', fontFamily: 'monospace', opacity: 0.9 }}>
+              {d._groupName}
             </span>
           </div>
         )}
+
+        <div style={{
+          padding: '6px 10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: `${accentColor}22`,
+          borderBottom: `1px solid ${accentColor}44`,
+        }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: accentColor, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#f1f5f9',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              display: 'block',
+            }}>
+              {d._attrName && d._attrName !== headerLabel ? d._attrName : headerLabel}
+            </span>
+            {d._attrName && d._attrName !== headerLabel && (
+              <span style={{ fontSize: 9, color: '#64748b', display: 'block' }}>{headerLabel}</span>
+            )}
+          </div>
+          {isCustom && (
+            <span style={{
+              fontSize: 8,
+              padding: '1px 4px',
+              borderRadius: 3,
+              background: `${accentColor}28`,
+              color: accentColor,
+              border: `1px solid ${accentColor}44`,
+              flexShrink: 0,
+            }}>mod</span>
+          )}
+          {d._canStartConnect && (
+            <button
+              type="button"
+              className="nodrag nopan"
+              data-testid={`connect-node-${id}`}
+              aria-label={`Connect from ${d._attrName ?? headerLabel}`}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                d._onStartConnect?.(id)
+              }}
+              style={iconButtonStyle(
+                d._isPendingConnectSource ? '#93c5fd' : `${accentColor}44`,
+                d._isPendingConnectSource ? '#172554' : '#0f1117',
+                d._isPendingConnectSource ? '#bfdbfe' : '#cbd5e1',
+              )}
+              title={d._isPendingConnectSource ? 'Connecting from this node' : 'Start connection from this node'}
+            >
+              ↗
+            </button>
+          )}
+          {d._canDelete && (
+            <button
+              type="button"
+              className="nodrag nopan"
+              data-testid={`delete-node-${id}`}
+              aria-label={`Delete ${d._attrName ?? headerLabel}`}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                d._onDelete?.(id)
+              }}
+              style={iconButtonStyle(`${accentColor}44`, '#0f1117', '#cbd5e1')}
+              title="Delete node"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
+          {d.diagnosticReason && (
+            <div style={{
+              marginBottom: 4,
+              padding: '5px 7px',
+              borderRadius: 8,
+              background: diagnosticSeverity === 'error'
+                ? '#2b1212'
+                : diagnosticSeverity === 'warning'
+                  ? '#2d2411'
+                  : '#102133',
+              border: `1px solid ${borderColor}33`,
+            }}>
+              <div style={{ fontSize: 9, color: borderColor, fontWeight: 700, textTransform: 'uppercase' }}>
+                {diagnosticSeverity ?? 'info'}
+              </div>
+              <div style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2, lineHeight: 1.4 }}>
+                {d.diagnosticReason}
+              </div>
+            </div>
+          )}
+          {Object.entries(d.params)
+            .filter(([key]) => key !== 'class')
+            .map(([key, value]) => (
+              <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 10, color: '#64748b', flexShrink: 0 }}>{key}</span>
+                <ParamValueEditor
+                  nodeId={id}
+                  blockType={d.blockType}
+                  paramKey={key}
+                  value={value}
+                  onCommit={d._onUpdateParam}
+                />
+              </div>
+            ))}
+          {isCollapsedModule && (
+            <div style={{
+              marginTop: 4,
+              padding: '6px 8px',
+              borderRadius: 8,
+              background: `${accentColor}14`,
+              border: `1px solid ${accentColor}33`,
+            }}>
+              <div style={{ fontSize: 10, color: '#cbd5e1', fontWeight: 600 }}>
+                internals hidden
+              </div>
+              <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>
+                {typeof d._subgraphSize === 'number' && d._subgraphSize > 0
+                  ? `${d._subgraphSize} traced ops available in expanded view`
+                  : 'switch to expanded view to inspect sub-ops'}
+              </div>
+            </div>
+          )}
+          {hasShape && (
+            <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #1e2535', textAlign: 'center' }}>
+              <span style={{ fontSize: 10, fontFamily: 'monospace', color: shapeError ? '#fbbf24' : '#34d399' }}>
+                {shapeError ? `⚠ ${d.outputShape}` : `→ ${d.outputShape}`}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Handles */}
       {(!isIO || def?.type === 'Output') && (
-        <Handle type="target" position={Position.Left}
+        <Handle
+          type="target"
+          position={Position.Left}
+          data-testid={`target-handle-${id}`}
           style={{ width: 10, height: 10, border: '2px solid #475569', background: '#1a2035', borderRadius: '50%' }}
         />
       )}
       {(!isIO || def?.type === 'Input') && (
-        <Handle type="source" position={Position.Right}
+        <Handle
+          type="source"
+          position={Position.Right}
+          data-testid={`source-handle-${id}`}
           style={{ width: 10, height: 10, border: '2px solid #475569', background: '#1a2035', borderRadius: '50%' }}
         />
       )}
@@ -143,9 +280,147 @@ export default function LayerNode({ data, selected }: NodeProps) {
   )
 }
 
+interface ParamValueEditorProps {
+  nodeId: string
+  blockType: string
+  paramKey: string
+  value: ParamValue
+  onCommit?: (nodeId: string, key: string, value: ParamValue) => void
+}
+
+function ParamValueEditor({ nodeId, blockType, paramKey, value, onCommit }: ParamValueEditorProps) {
+  const meta = inferParamMeta(blockType, paramKey, value)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(String(value))
+
+  useEffect(() => {
+    if (!editing) setDraft(String(value))
+  }, [editing, value])
+
+  const commit = () => {
+    onCommit?.(nodeId, paramKey, parseDraftValue(draft, meta.kind))
+    setEditing(false)
+  }
+
+  if (editing && meta.kind === 'bool') {
+    return (
+      <input
+        className="nodrag nopan"
+        type="checkbox"
+        checked={draft === 'true'}
+        onChange={(event) => {
+          const next = String(event.target.checked)
+          setDraft(next)
+          onCommit?.(nodeId, paramKey, parseDraftValue(next, meta.kind))
+        }}
+        onBlur={() => setEditing(false)}
+      />
+    )
+  }
+
+  if (editing) {
+    return (
+      <input
+        className="nodrag nopan"
+        data-testid={`param-input-${nodeId}-${paramKey}`}
+        autoFocus
+        type={meta.kind === 'int' || meta.kind === 'float' ? 'number' : 'text'}
+        step={meta.step}
+        min={meta.min}
+        max={meta.max}
+        placeholder={meta.placeholder}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commit()
+          if (event.key === 'Escape') {
+            setDraft(String(value))
+            setEditing(false)
+          }
+        }}
+        style={inputStyle}
+      />
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      className="nodrag nopan"
+      data-testid={`param-value-${nodeId}-${paramKey}`}
+      onMouseDown={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+      }}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setEditing(true)
+      }}
+      style={{
+        ...inputStyle,
+        width: 'auto',
+        minWidth: 72,
+        maxWidth: 120,
+        cursor: 'pointer',
+      }}
+      title="Click to edit"
+    >
+      {String(value)}
+    </button>
+  )
+}
+
+function parseDraftValue(draft: string, kind: ReturnType<typeof inferParamMeta>['kind']): ParamValue {
+  const trimmed = draft.trim()
+  if (kind === 'bool') return trimmed === 'true'
+  if (kind === 'int') {
+    const parsed = Number.parseInt(trimmed || '0', 10)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  if (kind === 'float') {
+    const parsed = Number.parseFloat(trimmed || '0')
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return trimmed
+}
+
+function iconButtonStyle(border: string, background: string, color: string) {
+  return {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    border: `1px solid ${border}`,
+    background,
+    color,
+    fontSize: 11,
+    lineHeight: 1,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    flexShrink: 0,
+  } satisfies CSSProperties
+}
+
+const inputStyle: CSSProperties = {
+  width: 96,
+  padding: '2px 6px',
+  borderRadius: 6,
+  border: '1px solid #475569',
+  background: '#0f172a',
+  color: '#e2e8f0',
+  fontSize: 11,
+  fontFamily: 'monospace',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
+
 function colorForName(name: string): string {
-  const COLORS = ['#c084fc','#fb923c','#34d399','#f472b6','#60a5fa','#facc15','#a78bfa','#4ade80']
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff
-  return COLORS[h % COLORS.length]
+  const colors = ['#c084fc', '#fb923c', '#34d399', '#f472b6', '#60a5fa', '#facc15', '#a78bfa', '#4ade80']
+  let hash = 0
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) & 0xffff
+  return colors[hash % colors.length]
 }

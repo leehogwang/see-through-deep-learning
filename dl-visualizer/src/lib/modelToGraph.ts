@@ -1,7 +1,7 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { ParsedModel, ParsedLayer, ForwardOp, ForwardTensorRef } from './api'
 import type { LayerNodeData } from '../components/FlowCanvas/nodes/LayerNode'
-import { BLOCK_MAP } from '../data/blocks'
+import { getBlockMap, type ParamValue } from '../data/blocks'
 import { layoutGraph } from './layoutGraph'
 
 let _id = 1000
@@ -26,7 +26,7 @@ function groupColor(name: string): string {
 interface ExpandedLayer {
   layer: ParsedLayer
   blockType: string
-  params: Record<string, string | number>
+  params: Record<string, ParamValue>
   path: string[]
 }
 
@@ -36,22 +36,25 @@ const Y_SPACING = 150
 const START_X = 60
 const START_Y = 80
 const LOW_SIGNAL_OPS = new Set(['merge', 'select'])
+const UTILITY_OPS = new Set(['merge', 'select', 'zip', 'stack'])
 
 export interface GraphOptions {
   expandSubmodules?: boolean
+  hideUtilityOps?: boolean
 }
 
 function resolveBlockType(layerType: string): string {
-  if (layerType in BLOCK_MAP) return layerType
+  const blockMap = getBlockMap()
+  if (layerType in blockMap) return layerType
   if (layerType === 'Select') return CUSTOM_MODULE_TYPE
   if (layerType === 'Placeholder') return CUSTOM_MODULE_TYPE
-  const ci = Object.keys(BLOCK_MAP).find(k => k.toLowerCase() === layerType.toLowerCase())
+  const ci = Object.keys(blockMap).find(k => k.toLowerCase() === layerType.toLowerCase())
   return ci ?? CUSTOM_MODULE_TYPE
 }
 
-function buildParams(blockType: string, layer: ParsedLayer): Record<string, string | number> {
+function buildParams(blockType: string, layer: ParsedLayer): Record<string, ParamValue> {
   const raw = layer.params
-  const p: Record<string, string | number> = {}
+  const p: Record<string, ParamValue> = {}
 
   if (blockType === CUSTOM_MODULE_TYPE) {
     p.class = layer.nn_type ?? layer.type
@@ -96,13 +99,12 @@ function buildParams(blockType: string, layer: ParsedLayer): Record<string, stri
   return p
 }
 
-function summarizeParams(params: Record<string, string | number>): Record<string, string | number> {
-  const entries = Object.entries(params)
-  return Object.fromEntries(entries.slice(0, 4))
-}
-
 function displayLabel(label: string): string {
   return label.replace(/_/g, ' ')
+}
+
+function paramsUseSelfState(params: Record<string, ParamValue> | undefined): boolean {
+  return Object.values(params ?? {}).some((value) => typeof value === 'string' && value.includes('self.'))
 }
 
 function makeNode(
@@ -130,6 +132,9 @@ function makeDataNode(label: string, x: number, y: number): Node {
     _groupName: undefined,
     _groupColor: '#22c55e',
     _isTopLevel: true,
+    _isUtility: false,
+    _expectedTerminal: false,
+    _runtimeShapeLocked: false,
   } satisfies LayerNodeData)
 }
 
@@ -181,8 +186,7 @@ function effectiveOutputLabel(op: ForwardOp): string {
 }
 
 function opKey(op: ForwardOp): string {
-  const inputs = op.inputs.map(input => input.label).join('|')
-  return `${op.output.label}::${inputs}`
+  return `${op.kind}::${op.output.token}`
 }
 
 function choosePreferredOps(ops: ForwardOp[]): Map<string, string> {
@@ -199,7 +203,7 @@ function choosePreferredOps(ops: ForwardOp[]): Map<string, string> {
 }
 
 function isAliasLike(op: ForwardOp, outputLabel: string, options: GraphOptions): boolean {
-  if (!options.expandSubmodules && LOW_SIGNAL_OPS.has(op.label)) return true
+  if (options.hideUtilityOps !== false && !options.expandSubmodules && LOW_SIGNAL_OPS.has(op.label)) return true
   const firstInputLabel = op.inputs[0]?.label
   if (op.label === 'stack' && firstInputLabel === outputLabel) return true
   if (op.block_type === 'Reshape' && firstInputLabel === outputLabel) return true
@@ -340,6 +344,9 @@ function buildAlgorithmicForwardGraph(
   for (const [index, input] of inputs.entries()) {
     const lane = laneForSignature([input.token])
     const node = makeDataNode(input.label, START_X, START_Y + lane * Y_SPACING + index * 14)
+    const data = node.data as LayerNodeData
+    data.outputShape = input.shape ? `(${input.shape.replace(/^\[|\]$/g, '')})` : ''
+    data._runtimeShapeLocked = !!input.shape
     nodes.push(node)
     tokenNodeIds.set(input.token, [node.id])
     opPosition.set(`input:${input.token}`, { rank: 0, lane })
@@ -375,10 +382,12 @@ function buildAlgorithmicForwardGraph(
       const lane = laneForSignature(signature)
       const display = displayLabel(effectiveOutputLabel(op))
       let blockType = op.block_type ?? undefined
-      const params = summarizeParams(op.params ?? {})
+      const params = { ...(op.params ?? {}) }
       const moduleClass = op.module_class ?? op.label
       const subModel = registry[moduleClass]
       const isCollapsibleModule = op.kind === 'module' && !!subModel?.forward_graph?.length
+      const isUtility = UTILITY_OPS.has(op.label) || UTILITY_OPS.has(display.toLowerCase())
+      const usesSelfState = paramsUseSelfState(op.params) || !!op.attr_path?.includes('.')
 
       if (!blockType) {
         const resolved = resolveBlockType(moduleClass)
@@ -397,7 +406,7 @@ function buildAlgorithmicForwardGraph(
         {
           blockType,
           params,
-          outputShape: '',
+          outputShape: op.output_shape ? `(${op.output_shape.replace(/^\[|\]$/g, '')})` : '',
           shapeError: false,
           _attrName: display,
           _customClassName: blockType === CUSTOM_MODULE_TYPE ? (op.module_class ?? op.label) : undefined,
@@ -406,6 +415,11 @@ function buildAlgorithmicForwardGraph(
           _isTopLevel: false,
           _isCollapsed: isCollapsibleModule && !options.expandSubmodules,
           _subgraphSize: isCollapsibleModule ? (subModel?.forward_graph?.length ?? 0) : undefined,
+          _isUtility: isUtility,
+          _expectedTerminal: false,
+          _attrPath: op.attr_path ?? undefined,
+          _usesSelfState: usesSelfState,
+          _runtimeShapeLocked: !!op.output_shape,
         } satisfies LayerNodeData,
       )
       nodes.push(node)
@@ -478,6 +492,8 @@ function buildAlgorithmicForwardGraph(
           continue
         }
         const subBlockType = subOp.block_type ?? resolveBlockType(subOp.module_class ?? subOp.label)
+        const isUtility = UTILITY_OPS.has(subOp.label) || UTILITY_OPS.has(subOutputLabel.toLowerCase())
+        const usesSelfState = paramsUseSelfState(subOp.params) || !!subOp.attr_path?.includes('.')
         const subNodeId = uid()
         const rankOffset = localIndex + 1
         const yOffset = subOutputLabel === 'hidden'
@@ -498,14 +514,19 @@ function buildAlgorithmicForwardGraph(
           },
           data: {
             blockType: subBlockType === CUSTOM_MODULE_TYPE ? CUSTOM_MODULE_TYPE : subBlockType,
-            params: summarizeParams(subOp.params ?? {}),
-            outputShape: '',
+            params: subOp.params ?? {},
+            outputShape: subOp.output_shape ? `(${subOp.output_shape.replace(/^\[|\]$/g, '')})` : '',
             shapeError: false,
             _attrName: displayLabel(subOutputLabel),
             _customClassName: subBlockType === CUSTOM_MODULE_TYPE ? (subOp.module_class ?? subOp.label) : undefined,
             _groupName: op.attr_path ?? op.attr ?? moduleClass,
             _groupColor: sharedColor,
             _isTopLevel: false,
+            _isUtility: isUtility,
+            _expectedTerminal: false,
+            _attrPath: subOp.attr_path ?? undefined,
+            _usesSelfState: usesSelfState,
+            _runtimeShapeLocked: !!subOp.output_shape,
           } satisfies LayerNodeData,
         })
         subTokenMap.set(subOp.output.token, [subNodeId])
@@ -582,7 +603,12 @@ function buildAlgorithmicForwardGraph(
             data._attrName === 'zip' &&
             (outDegree.get(node.id) ?? 0) === 0
           ) return true
-          if ((outDegree.get(node.id) ?? 0) === 0 && !protectedTerminalNodeIds.has(node.id)) {
+          if (
+            options.hideUtilityOps !== false &&
+            !!data._isUtility &&
+            (outDegree.get(node.id) ?? 0) === 0 &&
+            !protectedTerminalNodeIds.has(node.id)
+          ) {
             return true
           }
           return false
@@ -604,7 +630,18 @@ function buildAlgorithmicForwardGraph(
     }
   }
 
-  return layoutGraph(visibleNodes, visibleEdges)
+  const annotatedNodes = visibleNodes.map((node) => {
+    const data = node.data as LayerNodeData
+    return {
+      ...node,
+      data: {
+        ...data,
+        _expectedTerminal: protectedTerminalNodeIds.has(node.id),
+      } satisfies LayerNodeData,
+    }
+  })
+
+  return layoutGraph(annotatedNodes, visibleEdges)
 }
 
 function buildLinearGraph(
@@ -639,6 +676,11 @@ function buildLinearGraph(
       _groupName: groupName,
       _groupColor: gColor,
       _isTopLevel: isTopLevel,
+      _isUtility: false,
+      _expectedTerminal: i === expanded.length - 1,
+      _attrPath: item.path.join('.'),
+      _usesSelfState: false,
+      _runtimeShapeLocked: false,
     } satisfies LayerNodeData)
     nodes.push(node)
 

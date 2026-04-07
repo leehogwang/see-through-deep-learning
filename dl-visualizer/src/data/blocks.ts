@@ -1,14 +1,31 @@
+export type ParamValue = string | number | boolean
+
+export interface ParamMeta {
+  kind?: 'int' | 'float' | 'tuple' | 'shape' | 'bool' | 'text'
+  min?: number
+  max?: number
+  step?: number
+  placeholder?: string
+}
+
 export interface BlockDef {
   type: string
   label: string
   category: string
   color: string
+  maxInputs?: number
   formula?: string
   description: string
-  defaultParams: Record<string, string | number>
+  defaultParams: Record<string, ParamValue>
 }
 
-export const CATEGORIES = [
+export interface CategoryDef {
+  id: string
+  icon: string
+  label: string
+}
+
+export const STATIC_CATEGORIES: CategoryDef[] = [
   { id: 'io',           icon: '📥', label: 'Input / Output' },
   { id: 'conv',         icon: '🔲', label: 'Convolution' },
   { id: 'pooling',      icon: '🏊', label: 'Pooling' },
@@ -23,7 +40,9 @@ export const CATEGORIES = [
   { id: 'linear',       icon: '🔵', label: 'Linear' },
 ]
 
-export const BLOCKS: BlockDef[] = [
+export const CATEGORIES = STATIC_CATEGORIES
+
+export const STATIC_BLOCKS: BlockDef[] = [
   // ── IO ──────────────────────────────────────────────────────
   {
     type: 'Input', label: 'Input', category: 'io', color: '#10b981',
@@ -209,6 +228,7 @@ export const BLOCKS: BlockDef[] = [
   // ── Attention ────────────────────────────────────────────────
   {
     type: 'MultiHeadAttention', label: 'Multi-Head Attention', category: 'attention', color: '#8b5cf6',
+    maxInputs: 3,
     formula: 'softmax(QKᵀ/√d)V',
     description: '여러 헤드가 병렬로 attention을 계산. 토큰 간 관계(문맥)를 학습합니다. Transformer의 핵심 연산입니다.',
     defaultParams: { embed_dim: 512, num_heads: 8 },
@@ -220,6 +240,7 @@ export const BLOCKS: BlockDef[] = [
   },
   {
     type: 'CrossAttention', label: 'Cross-Attention', category: 'attention', color: '#8b5cf6',
+    maxInputs: 3,
     description: 'Q는 디코더, K·V는 인코더에서 추출. 번역, 이미지 캡셔닝 등 두 시퀀스 관계를 학습합니다.',
     defaultParams: { embed_dim: 512, num_heads: 8 },
   },
@@ -351,11 +372,13 @@ export const BLOCKS: BlockDef[] = [
   },
   {
     type: 'Concat', label: 'Concat', category: 'shape', color: '#64748b',
+    maxInputs: 8,
     description: '여러 텐서를 특정 차원으로 이어붙입니다. Skip connection에서 사용됩니다.',
     defaultParams: { dim: 1 },
   },
   {
     type: 'Add', label: 'Add (Residual)', category: 'shape', color: '#64748b',
+    maxInputs: 2,
     formula: 'y = F(x) + x',
     description: '잔차 연결(skip connection). ResNet의 핵심으로 기울기 소실 문제를 해결합니다.',
     defaultParams: {},
@@ -403,4 +426,270 @@ export const BLOCKS: BlockDef[] = [
   },
 ]
 
-export const BLOCK_MAP = Object.fromEntries(BLOCKS.map(b => [b.type, b]))
+let dynamicBlocks: BlockDef[] = []
+
+export const BLOCKS = STATIC_BLOCKS
+
+export function setDynamicBlocks(blocks: BlockDef[]) {
+  dynamicBlocks = blocks
+    .filter((block) => !STATIC_BLOCKS.some((staticBlock) => staticBlock.type === block.type))
+    .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+export function getBlockCatalog(): BlockDef[] {
+  return [...STATIC_BLOCKS, ...dynamicBlocks]
+}
+
+export function getBlockMap(): Record<string, BlockDef> {
+  return Object.fromEntries(getBlockCatalog().map((block) => [block.type, block]))
+}
+
+export function getBlockDef(type: string): BlockDef | undefined {
+  return getBlockMap()[type]
+}
+
+export function getCategoryCatalog(): CategoryDef[] {
+  const known = new Map(STATIC_CATEGORIES.map((category) => [category.id, category]))
+  const dynamicCategories = [...new Set(
+    getBlockCatalog()
+      .map((block) => block.category)
+      .filter((category) => !known.has(category)),
+  )]
+    .sort()
+    .map((category) => ({
+      id: category,
+      icon: iconForCategory(category),
+      label: categoryLabel(category),
+    }))
+  return [...STATIC_CATEGORIES, ...dynamicCategories]
+}
+
+const BLOCK_PARAM_META: Record<string, Record<string, ParamMeta>> = {
+  Input: {
+    shape: { kind: 'shape', placeholder: 'B,3,224,224' },
+  },
+  Conv1D: {
+    in_ch: { kind: 'int', min: 1, step: 1 },
+    out_ch: { kind: 'int', min: 1, step: 1 },
+    kernel: { kind: 'tuple', placeholder: '3' },
+    stride: { kind: 'tuple', placeholder: '1' },
+    padding: { kind: 'tuple', placeholder: '1' },
+  },
+  Conv2D: {
+    in_ch: { kind: 'int', min: 1, step: 1 },
+    out_ch: { kind: 'int', min: 1, step: 1 },
+    kernel: { kind: 'tuple', placeholder: '3 or 3,3' },
+    stride: { kind: 'tuple', placeholder: '1 or 1,1' },
+    padding: { kind: 'tuple', placeholder: '1 or 1,1' },
+  },
+  Conv3D: {
+    in_ch: { kind: 'int', min: 1, step: 1 },
+    out_ch: { kind: 'int', min: 1, step: 1 },
+    kernel: { kind: 'tuple', placeholder: '3 or 3,3,3' },
+    stride: { kind: 'tuple', placeholder: '1 or 1,1,1' },
+    padding: { kind: 'tuple', placeholder: '1 or 1,1,1' },
+  },
+  DepthwiseConv2D: {
+    in_ch: { kind: 'int', min: 1, step: 1 },
+    kernel: { kind: 'tuple', placeholder: '3 or 3,3' },
+    stride: { kind: 'tuple', placeholder: '1 or 1,1' },
+    padding: { kind: 'tuple', placeholder: '1 or 1,1' },
+  },
+  SeparableConv2D: {
+    in_ch: { kind: 'int', min: 1, step: 1 },
+    out_ch: { kind: 'int', min: 1, step: 1 },
+    kernel: { kind: 'tuple', placeholder: '3 or 3,3' },
+  },
+  TransposedConv2D: {
+    in_ch: { kind: 'int', min: 1, step: 1 },
+    out_ch: { kind: 'int', min: 1, step: 1 },
+    kernel: { kind: 'tuple', placeholder: '2 or 2,2' },
+    stride: { kind: 'tuple', placeholder: '2 or 2,2' },
+  },
+  DilatedConv2D: {
+    in_ch: { kind: 'int', min: 1, step: 1 },
+    out_ch: { kind: 'int', min: 1, step: 1 },
+    kernel: { kind: 'tuple', placeholder: '3 or 3,3' },
+    dilation: { kind: 'tuple', placeholder: '2 or 2,2' },
+  },
+  MaxPool2D: {
+    kernel: { kind: 'tuple', placeholder: '2 or 2,2' },
+    stride: { kind: 'tuple', placeholder: '2 or 2,2' },
+  },
+  AvgPool2D: {
+    kernel: { kind: 'tuple', placeholder: '2 or 2,2' },
+    stride: { kind: 'tuple', placeholder: '2 or 2,2' },
+  },
+  AdaptiveAvgPool: {
+    output_size: { kind: 'tuple', placeholder: '1,1' },
+  },
+  LeakyReLU: {
+    alpha: { kind: 'float', min: 0, step: 0.01 },
+  },
+  ELU: {
+    alpha: { kind: 'float', min: 0, step: 0.1 },
+  },
+  Softmax: {
+    dim: { kind: 'int', step: 1 },
+  },
+  BatchNorm2D: {
+    num_features: { kind: 'int', min: 1, step: 1 },
+  },
+  LayerNorm: {
+    normalized_shape: { kind: 'tuple', placeholder: '512 or 512,512' },
+  },
+  GroupNorm: {
+    num_groups: { kind: 'int', min: 1, step: 1 },
+    num_channels: { kind: 'int', min: 1, step: 1 },
+  },
+  InstanceNorm: {
+    num_features: { kind: 'int', min: 1, step: 1 },
+  },
+  RMSNorm: {
+    dim: { kind: 'int', min: 1, step: 1 },
+  },
+  MultiHeadAttention: {
+    embed_dim: { kind: 'int', min: 1, step: 1 },
+    num_heads: { kind: 'int', min: 1, step: 1 },
+  },
+  SelfAttention: {
+    embed_dim: { kind: 'int', min: 1, step: 1 },
+    num_heads: { kind: 'int', min: 1, step: 1 },
+  },
+  CrossAttention: {
+    embed_dim: { kind: 'int', min: 1, step: 1 },
+    num_heads: { kind: 'int', min: 1, step: 1 },
+  },
+  FlashAttention: {
+    embed_dim: { kind: 'int', min: 1, step: 1 },
+    num_heads: { kind: 'int', min: 1, step: 1 },
+  },
+  GQA: {
+    embed_dim: { kind: 'int', min: 1, step: 1 },
+    num_heads: { kind: 'int', min: 1, step: 1 },
+    num_kv_heads: { kind: 'int', min: 1, step: 1 },
+  },
+  MQA: {
+    embed_dim: { kind: 'int', min: 1, step: 1 },
+    num_heads: { kind: 'int', min: 1, step: 1 },
+  },
+  LinearAttention: {
+    embed_dim: { kind: 'int', min: 1, step: 1 },
+  },
+  LSTM: {
+    input_size: { kind: 'int', min: 1, step: 1 },
+    hidden_size: { kind: 'int', min: 1, step: 1 },
+    num_layers: { kind: 'int', min: 1, step: 1 },
+  },
+  GRU: {
+    input_size: { kind: 'int', min: 1, step: 1 },
+    hidden_size: { kind: 'int', min: 1, step: 1 },
+  },
+  RNN: {
+    input_size: { kind: 'int', min: 1, step: 1 },
+    hidden_size: { kind: 'int', min: 1, step: 1 },
+  },
+  BiLSTM: {
+    input_size: { kind: 'int', min: 1, step: 1 },
+    hidden_size: { kind: 'int', min: 1, step: 1 },
+  },
+  BiGRU: {
+    input_size: { kind: 'int', min: 1, step: 1 },
+    hidden_size: { kind: 'int', min: 1, step: 1 },
+  },
+  Embedding: {
+    num_embeddings: { kind: 'int', min: 1, step: 1 },
+    embedding_dim: { kind: 'int', min: 1, step: 1 },
+  },
+  TransformerEncoderLayer: {
+    d_model: { kind: 'int', min: 1, step: 1 },
+    nhead: { kind: 'int', min: 1, step: 1 },
+    dim_feedforward: { kind: 'int', min: 1, step: 1 },
+  },
+  TransformerDecoderLayer: {
+    d_model: { kind: 'int', min: 1, step: 1 },
+    nhead: { kind: 'int', min: 1, step: 1 },
+    dim_feedforward: { kind: 'int', min: 1, step: 1 },
+  },
+  Flatten: {
+    start_dim: { kind: 'int', step: 1 },
+  },
+  Reshape: {
+    shape: { kind: 'shape', placeholder: 'B,-1' },
+  },
+  Squeeze: {
+    dim: { kind: 'int', step: 1 },
+  },
+  Unsqueeze: {
+    dim: { kind: 'int', step: 1 },
+  },
+  Permute: {
+    dims: { kind: 'tuple', placeholder: '0,2,3,1' },
+  },
+  Concat: {
+    dim: { kind: 'int', step: 1 },
+  },
+  Split: {
+    dim: { kind: 'int', step: 1 },
+  },
+  Dropout: {
+    p: { kind: 'float', min: 0, max: 1, step: 0.05 },
+  },
+  Dropout2D: {
+    p: { kind: 'float', min: 0, max: 1, step: 0.05 },
+  },
+  DropPath: {
+    drop_prob: { kind: 'float', min: 0, max: 1, step: 0.05 },
+  },
+  SpatialDropout: {
+    p: { kind: 'float', min: 0, max: 1, step: 0.05 },
+  },
+  Linear: {
+    in_features: { kind: 'int', min: 1, step: 1 },
+    out_features: { kind: 'int', min: 1, step: 1 },
+  },
+  Bilinear: {
+    in1: { kind: 'int', min: 1, step: 1 },
+    in2: { kind: 'int', min: 1, step: 1 },
+    out: { kind: 'int', min: 1, step: 1 },
+  },
+}
+
+export function inferParamMeta(
+  blockType: string,
+  key: string,
+  value: ParamValue | undefined,
+): ParamMeta {
+  const explicit = BLOCK_PARAM_META[blockType]?.[key]
+  if (explicit) return explicit
+
+  if (typeof value === 'boolean') return { kind: 'bool' }
+  if (typeof value === 'number') return Number.isInteger(value)
+    ? { kind: 'int', step: 1 }
+    : { kind: 'float', step: 0.01 }
+  if (typeof value === 'string') {
+    if (key === 'shape') return { kind: 'shape', placeholder: value }
+    if (value.includes(',')) return { kind: 'tuple', placeholder: value }
+    if (value === 'true' || value === 'false') return { kind: 'bool' }
+    if (/^-?\d+$/.test(value.trim())) return { kind: 'int', step: 1 }
+    if (/^-?\d*\.\d+$/.test(value.trim())) return { kind: 'float', step: 0.01 }
+  }
+  return { kind: 'text' }
+}
+
+function categoryLabel(category: string): string {
+  return category
+    .split(/[_-]/g)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+}
+
+function iconForCategory(category: string): string {
+  if (category.includes('loss')) return '📉'
+  if (category.includes('container')) return '🧱'
+  if (category.includes('padding')) return '🪟'
+  if (category.includes('upsample')) return '🪄'
+  if (category.includes('distance')) return '📐'
+  if (category.includes('vision')) return '🖼️'
+  return '🧩'
+}

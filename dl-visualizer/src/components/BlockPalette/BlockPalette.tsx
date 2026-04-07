@@ -1,13 +1,30 @@
 import { useState } from 'react'
-import { BLOCKS, CATEGORIES } from '../../data/blocks'
+import { getBlockCatalog, getCategoryCatalog } from '../../data/blocks'
+
+function normalizeSearchToken(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
 
 export default function BlockPalette() {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState<Record<string, boolean>>({ io: true, conv: true, activation: true })
+  const blocks = getBlockCatalog()
+  const categories = getCategoryCatalog()
 
   const query = search.toLowerCase()
+  const normalizedQuery = normalizeSearchToken(search)
   const filtered = query
-    ? BLOCKS.filter(b => b.label.toLowerCase().includes(query) || b.category.includes(query))
+    ? blocks.filter((b) => {
+      const normalizedLabel = normalizeSearchToken(b.label)
+      const normalizedCategory = normalizeSearchToken(b.category)
+      const normalizedType = normalizeSearchToken(b.type)
+      return b.label.toLowerCase().includes(query)
+        || b.category.includes(query)
+        || b.type.toLowerCase().includes(query)
+        || normalizedLabel.includes(normalizedQuery)
+        || normalizedCategory.includes(normalizedQuery)
+        || normalizedType.includes(normalizedQuery)
+    })
     : null
 
   const onDragStart = (e: React.DragEvent, type: string) => {
@@ -20,6 +37,7 @@ export default function BlockPalette() {
       <div style={{ padding: '10px 12px', borderBottom: '1px solid #2a3347', flexShrink: 0 }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: '0.08em', marginBottom: 6 }}>BLOCKS</p>
         <input
+          data-testid="block-search-input"
           type="text"
           placeholder="Search blocks…"
           value={search}
@@ -41,12 +59,13 @@ export default function BlockPalette() {
             {filtered.map(b => <DraggableBlock key={b.type} block={b} onDragStart={onDragStart} />)}
           </div>
         ) : (
-          CATEGORIES.map(cat => {
-            const blocks = BLOCKS.filter(b => b.category === cat.id)
+          categories.map(cat => {
+            const categoryBlocks = blocks.filter(b => b.category === cat.id)
             const isOpen = open[cat.id] ?? false
             return (
               <div key={cat.id} style={{ borderBottom: '1px solid #1e2535' }}>
                 <button
+                  data-testid={`category-toggle-${cat.id}`}
                   onClick={() => setOpen(o => ({ ...o, [cat.id]: !isOpen }))}
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: 6,
@@ -58,12 +77,12 @@ export default function BlockPalette() {
                 >
                   <span style={{ fontSize: 14, lineHeight: 1 }}>{cat.icon}</span>
                   <span style={{ fontSize: 12, fontWeight: 500, color: '#94a3b8', flex: 1 }}>{cat.label}</span>
-                  <span style={{ fontSize: 10, color: '#475569' }}>{blocks.length}</span>
+                  <span style={{ fontSize: 10, color: '#475569' }}>{categoryBlocks.length}</span>
                   <span style={{ fontSize: 10, color: '#475569', marginLeft: 2 }}>{isOpen ? '▲' : '▼'}</span>
                 </button>
                 {isOpen && (
                   <div style={{ padding: '2px 8px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {blocks.map(b => <DraggableBlock key={b.type} block={b} onDragStart={onDragStart} />)}
+                    {categoryBlocks.map(b => <DraggableBlock key={b.type} block={b} onDragStart={onDragStart} />)}
                   </div>
                 )}
               </div>
@@ -84,6 +103,7 @@ function DraggableBlock({
 }) {
   return (
     <div
+      data-testid={`block-${block.type}`}
       draggable
       onDragStart={e => onDragStart(e, block.type)}
       style={{

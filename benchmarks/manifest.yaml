@@ -1,0 +1,348 @@
+repos:
+  pytorch_examples:
+    url: https://github.com/pytorch/examples.git
+    ref: main
+    local_dir: benchmarks/vendor/pytorch-examples
+  pytorch_vision:
+    url: https://github.com/pytorch/vision.git
+    ref: main
+    local_dir: benchmarks/vendor/pytorch-vision
+  recipe_local:
+    url: local
+    ref: local
+    local_dir: /home/students/cs/202421012/food_weight_estimation/VIF2/recipe_adamine
+
+benchmarks:
+  - id: level1-mnist
+    level: 1
+    official: true
+    label: MNIST Net
+    repo: pytorch_examples
+    task: image-classification
+    tags: [cnn, starter, image]
+    entry_file: mnist/main.py
+    registry_dir: mnist
+    model_name: Net
+    sample_preview:
+      repo_paths: []
+      fallback_path: benchmarks/samples/mnist-digit.png
+      caption: Handwritten digit sample
+
+  - id: level1-super-resolution
+    level: 1
+    official: true
+    label: Super Resolution Net
+    repo: pytorch_examples
+    task: image-super-resolution
+    tags: [cnn, starter, image]
+    entry_file: super_resolution/model.py
+    registry_dir: super_resolution
+    model_name: Net
+    sample_preview:
+      repo_paths: []
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Lightweight image upscaling sample
+
+  - id: level1-alexnet
+    level: 1
+    official: true
+    label: AlexNet
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, classic, image]
+    entry_file: torchvision/models/alexnet.py
+    registry_dir: torchvision/models
+    model_name: AlexNet
+    runtime_factory: alexnet
+    sample_preview:
+      repo_paths: [gallery/assets/dog1.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Dog image classification sample
+
+  - id: level1-squeezenet
+    level: 1
+    official: true
+    label: SqueezeNet 1.0
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, compact, image]
+    entry_file: torchvision/models/squeezenet.py
+    registry_dir: torchvision/models
+    model_name: SqueezeNet
+    runtime_factory: squeezenet1_0
+    sample_preview:
+      repo_paths: [gallery/assets/dog2.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Compact classifier image sample
+
+  - id: level2-vgg11
+    level: 2
+    official: true
+    label: VGG 11
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, vgg, image]
+    entry_file: torchvision/models/vgg.py
+    registry_dir: torchvision/models
+    model_name: VGG
+    runtime_factory: vgg11
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Natural image for deep CNN tracing
+
+  - id: level2-vgg16
+    level: 2
+    official: true
+    label: VGG 16
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, vgg, image]
+    entry_file: torchvision/models/vgg.py
+    registry_dir: torchvision/models
+    model_name: VGG
+    runtime_factory: vgg16
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Deep CNN image benchmark
+
+  - id: level2-resnet18
+    level: 2
+    official: true
+    label: ResNet 18
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, residual, image]
+    entry_file: torchvision/models/resnet.py
+    registry_dir: torchvision/models
+    model_name: ResNet
+    runtime_factory: resnet18
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Residual-network image classification sample
+
+  - id: level2-densenet121
+    level: 2
+    official: true
+    label: DenseNet 121
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, dense, image]
+    entry_file: torchvision/models/densenet.py
+    registry_dir: torchvision/models
+    model_name: DenseNet
+    runtime_factory: densenet121
+    sample_preview:
+      repo_paths: [gallery/assets/dog2.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Dense connectivity benchmark on natural image data
+
+  - id: level3-googlenet
+    level: 3
+    official: true
+    label: GoogLeNet
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, inception, image]
+    entry_file: torchvision/models/googlenet.py
+    registry_dir: torchvision/models
+    model_name: GoogLeNet
+    runtime_factory: googlenet
+    sample_preview:
+      repo_paths: [gallery/assets/dog1.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Inception-style classification sample
+
+  - id: level3-inception-v3
+    level: 3
+    official: true
+    label: Inception V3
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, inception, image]
+    entry_file: torchvision/models/inception.py
+    registry_dir: torchvision/models
+    model_name: Inception3
+    runtime_factory: inception_v3
+    sample_preview:
+      repo_paths: [gallery/assets/dog1.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Multi-branch classification benchmark
+
+  - id: level3-mobilenet-v2
+    level: 3
+    official: true
+    label: MobileNet V2
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, mobile, image]
+    entry_file: torchvision/models/mobilenetv2.py
+    registry_dir: torchvision/models
+    model_name: MobileNetV2
+    runtime_factory: mobilenet_v2
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Mobile CNN image benchmark
+
+  - id: level3-mobilenet-v3-large
+    level: 3
+    official: true
+    label: MobileNet V3 Large
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, mobile, image]
+    entry_file: torchvision/models/mobilenetv3.py
+    registry_dir: torchvision/models
+    model_name: MobileNetV3
+    runtime_factory: mobilenet_v3_large
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Efficient mobile image classifier
+
+  - id: level4-efficientnet-b0
+    level: 4
+    official: true
+    label: EfficientNet B0
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, efficientnet, image]
+    entry_file: torchvision/models/efficientnet.py
+    registry_dir: torchvision/models
+    model_name: EfficientNet
+    runtime_factory: efficientnet_b0
+    sample_preview:
+      repo_paths: [gallery/assets/dog2.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Compound-scaled image classification sample
+
+  - id: level4-convnext-tiny
+    level: 4
+    official: true
+    label: ConvNeXt Tiny
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, convnext, image]
+    entry_file: torchvision/models/convnext.py
+    registry_dir: torchvision/models
+    model_name: ConvNeXt
+    runtime_factory: convnext_tiny
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Modernized convolutional architecture sample
+
+  - id: level4-shufflenet-v2
+    level: 4
+    official: true
+    label: ShuffleNet V2 x1.0
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, shuffle, image]
+    entry_file: torchvision/models/shufflenetv2.py
+    registry_dir: torchvision/models
+    model_name: ShuffleNetV2
+    runtime_factory: shufflenet_v2_x1_0
+    sample_preview:
+      repo_paths: [gallery/assets/dog2.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Channel-shuffle benchmark sample
+
+  - id: level4-regnet-y400mf
+    level: 4
+    official: true
+    label: RegNet Y 400MF
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, regnet, image]
+    entry_file: torchvision/models/regnet.py
+    registry_dir: torchvision/models
+    model_name: RegNet
+    runtime_factory: regnet_y_400mf
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Design-space derived CNN benchmark
+
+  - id: level5-swin-t
+    level: 5
+    official: true
+    label: Swin Transformer Tiny
+    repo: pytorch_vision
+    task: image-classification
+    tags: [transformer, swin, image]
+    entry_file: torchvision/models/swin_transformer.py
+    registry_dir: torchvision/models
+    model_name: SwinTransformer
+    runtime_factory: swin_t
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Hierarchical transformer benchmark
+
+  - id: level5-vit-b16
+    level: 5
+    official: true
+    label: Vision Transformer B16
+    repo: pytorch_vision
+    task: image-classification
+    tags: [transformer, vit, image]
+    entry_file: torchvision/models/vision_transformer.py
+    registry_dir: torchvision/models
+    model_name: VisionTransformer
+    runtime_factory: vit_b_16
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Patch-based transformer image sample
+
+  - id: level5-maxvit-t
+    level: 5
+    official: true
+    label: MaxViT T
+    repo: pytorch_vision
+    task: image-classification
+    tags: [transformer, maxvit, image]
+    entry_file: torchvision/models/maxvit.py
+    registry_dir: torchvision/models
+    model_name: MaxVit
+    runtime_factory: maxvit_t
+    sample_preview:
+      repo_paths: [gallery/assets/dog1.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Multi-axis attention image benchmark
+
+  - id: level5-wide-resnet50-2
+    level: 5
+    official: true
+    label: Wide ResNet 50-2
+    repo: pytorch_vision
+    task: image-classification
+    tags: [cnn, residual, image]
+    entry_file: torchvision/models/resnet.py
+    registry_dir: torchvision/models
+    model_name: ResNet
+    runtime_factory: wide_resnet50_2
+    sample_preview:
+      repo_paths: [gallery/assets/astronaut.jpg]
+      fallback_path: benchmarks/samples/vision-classification.jpg
+      caption: Wide residual classifier sample
+
+  - id: regression-recipe-rag
+    level: 5
+    official: false
+    label: Fusion Nutrition Model Recipe RAG
+    repo: recipe_local
+    task: food-multimodal-regression
+    tags: [local, regression, food]
+    entry_file: model_recipe_rag_RNS.py
+    registry_dir: .
+    model_name: FusionNutritionModelRecipeRAG
+    local_only: true
+    sample_preview:
+      repo_paths: []
+      fallback_path: benchmarks/samples/food-bibimbap.jpg
+      caption: Food image used for local regression preview

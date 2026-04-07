@@ -78,7 +78,10 @@ def const_value(node):
         return node.value
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
         v = const_value(node.operand)
-        return -v if v is not None else None
+        if isinstance(v, (int, float, complex)):
+            return -v
+        raw = safe_unparse(node)
+        return raw if raw is not None else None
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -459,10 +462,17 @@ class ForwardGraphBuilder:
         return merged
 
     def is_scalarish_expr(self, node):
-        if isinstance(node, (ast.Constant, ast.Compare, ast.BoolOp)):
+        if isinstance(node, ast.Constant):
             return True
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-            return True
+            return self.is_scalarish_expr(node.operand)
+        if isinstance(node, ast.BoolOp):
+            return all(self.is_scalarish_expr(value) for value in node.values)
+        if isinstance(node, ast.Compare):
+            if all(isinstance(op, (ast.Is, ast.IsNot, ast.In, ast.NotIn)) for op in node.ops):
+                return True
+            operands = [node.left, *node.comparators]
+            return all(self.is_scalarish_expr(operand) for operand in operands)
         if isinstance(node, ast.Attribute):
             return node.attr in {'device', 'dtype', 'shape'}
         if isinstance(node, ast.Call):
@@ -568,7 +578,22 @@ class ForwardGraphBuilder:
             refs.extend(self.expr_refs(node.orelse, env, non_tensor_vars, desired_label))
             return unique_refs(refs)
 
+        if isinstance(node, ast.BoolOp):
+            refs = []
+            for value in node.values:
+                refs.extend(self.expr_refs(value, env, non_tensor_vars, desired_label))
+            return unique_refs(refs)
+
+        if isinstance(node, ast.Compare):
+            refs = []
+            refs.extend(self.expr_refs(node.left, env, non_tensor_vars, desired_label))
+            for comparator in node.comparators:
+                refs.extend(self.expr_refs(comparator, env, non_tensor_vars, desired_label))
+            return unique_refs(refs)
+
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            return self.expr_refs(node.operand, env, non_tensor_vars, desired_label)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
             return self.expr_refs(node.operand, env, non_tensor_vars, desired_label)
 
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
@@ -724,7 +749,8 @@ class ForwardGraphBuilder:
         for stmt in stmts:
             if isinstance(stmt, ast.Assign):
                 if len(stmt.targets) == 1:
-                    name = target_name(stmt.targets[0])
+                    target = stmt.targets[0]
+                    name = target_name(target)
                     if name:
                         if self.is_scalarish_expr(stmt.value):
                             non_tensor_vars.add(name)
@@ -732,9 +758,9 @@ class ForwardGraphBuilder:
                             continue
                         refs = self.expr_refs(stmt.value, env, non_tensor_vars, desired_label=name)
                         if refs:
-                            merge = isinstance(stmt.targets[0], ast.Subscript)
+                            merge = isinstance(target, ast.Subscript)
                             if merge and name in env:
-                                selector = safe_unparse(stmt.targets[0].slice)
+                                selector = safe_unparse(target.slice)
                                 refs = self.merge_refs(
                                     name,
                                     env.get(name, []),
@@ -744,6 +770,11 @@ class ForwardGraphBuilder:
                                 self.assign_target(name, refs, env)
                             else:
                                 self.assign_target(name, refs, env, merge=merge)
+                        continue
+                    if isinstance(target, (ast.Tuple, ast.List)):
+                        refs = self.expr_refs(stmt.value, env, non_tensor_vars)
+                        if refs:
+                            self.bind_pattern_refs(target, refs, env)
                         continue
                 # fallback: still walk value for nested ops
                 self.expr_refs(stmt.value, env, non_tensor_vars)

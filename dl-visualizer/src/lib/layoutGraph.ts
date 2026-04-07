@@ -17,10 +17,18 @@ function estimateNodeSize(node: Node): { width: number; height: number } {
 }
 
 export function layoutGraph(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[] } {
+  return layoutGraphWithDirection(nodes, edges, 'LR')
+}
+
+export function layoutGraphWithDirection(
+  nodes: Node[],
+  edges: Edge[],
+  direction: 'LR' | 'TB' | 'RL' | 'BT' = 'LR',
+): { nodes: Node[]; edges: Edge[] } {
   const graph = new dagre.graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
   graph.setGraph({
-    rankdir: 'LR',
+    rankdir: direction,
     ranksep: 140,
     nodesep: 70,
     edgesep: 30,
