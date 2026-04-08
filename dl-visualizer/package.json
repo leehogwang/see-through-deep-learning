@@ -13,6 +13,8 @@
     "test:agent-panel": "node scripts/test-agent-panel.mjs",
     "test:agent-matrix": "node scripts/test-agent-matrix.mjs",
     "test:canvas-e2e": "node scripts/test-canvas-e2e.mjs",
+    "test:palette-ui-insertions": "node scripts/test-palette-ui-insertions.mjs",
+    "audit:palette-shapes": "rm -rf .tmp-audit && npx tsc --outDir .tmp-audit --module esnext --moduleResolution bundler --target es2022 --skipLibCheck scripts/audit-palette-shapes.ts src/data/blocks.ts src/lib/shapeCalculator.ts && node --experimental-specifier-resolution=node .tmp-audit/scripts/audit-palette-shapes.js",
     "benchmarks:fetch": "node scripts/fetch-benchmarks.mjs",
     "benchmarks:run": "node scripts/run-benchmarks.mjs",
     "benchmarks:ui": "node scripts/run-ui-mismatch-benchmarks.mjs",

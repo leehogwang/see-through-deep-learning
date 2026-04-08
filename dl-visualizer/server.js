@@ -13,6 +13,7 @@ const MANIFEST_PATH = path.join(BENCHMARKS_ROOT, 'manifest.yaml')
 const REPORT_PATH = path.join(BENCHMARKS_ROOT, 'reports', 'latest.json')
 const RUNTIME_TRACE_PATH = path.join(__dirname, 'runtime_trace.py')
 const TRACE_LAYER_DATA_PATH = path.join(__dirname, 'trace_layer_data.py')
+const TRACE_EDITED_GRAPH_DATA_PATH = path.join(__dirname, 'trace_edited_graph_data.py')
 const TORCH_BLOCK_CATALOG_PATH = path.join(__dirname, 'torch_block_catalog.py')
 const SAMPLE_DISCOVERY_PATH = path.join(__dirname, 'sample_discovery.py')
 
@@ -1284,6 +1285,22 @@ app.post('/api/trace-layer-data', (req, res) => {
     res.json(result)
   } catch (error) {
     res.json({ previews: {}, inputPreviews: {}, error: error.message })
+  }
+})
+
+app.post('/api/trace-edited-graph-data', (req, res) => {
+  const { repoRoot, sourceFile, modelName, code } = req.body ?? {}
+  if (!repoRoot || !sourceFile || !modelName || !code) {
+    return res.json({ previews: {}, inputPreview: null, error: 'repoRoot, sourceFile, modelName, code are required' })
+  }
+  if (!fs.existsSync(sourceFile)) {
+    return res.json({ previews: {}, inputPreview: null, error: `sourceFile not found: ${sourceFile}` })
+  }
+  try {
+    const result = runSandboxedPython(TRACE_EDITED_GRAPH_DATA_PATH, req.body, repoRoot)
+    res.json(result)
+  } catch (error) {
+    res.json({ previews: {}, inputPreview: null, error: error.message })
   }
 })
 

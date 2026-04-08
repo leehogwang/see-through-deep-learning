@@ -1,0 +1,626 @@
+{
+  "generatedAt": "2026-04-07T12:52:50.448Z",
+  "total": 76,
+  "inserted": 75,
+  "failed": 1,
+  "failures": [
+    {
+      "blockTestId": "block-Mish",
+      "inserted": false,
+      "nodeText": "",
+      "healthText": "",
+      "error": "expected node count 1, got 0",
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Mish.png"
+    }
+  ],
+  "results": [
+    {
+      "blockTestId": "block-Input",
+      "inserted": true,
+      "nodeText": "Input↗×errorThis node has no outgoing edge and is not classified as an expected model output.shapeB,3,224,224→ (B, 3, 224, 224)",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Input.png"
+    },
+    {
+      "blockTestId": "block-Output",
+      "inserted": true,
+      "nodeText": "Output×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Output.png"
+    },
+    {
+      "blockTestId": "block-Conv1D",
+      "inserted": true,
+      "nodeText": "Conv1D↗×errorThis node has no incoming edge even though it is not a declared graph input.in_ch1out_ch32kernel3stride1padding1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Conv1D.png"
+    },
+    {
+      "blockTestId": "block-Conv2D",
+      "inserted": true,
+      "nodeText": "Conv2D↗×errorThis node has no incoming edge even though it is not a declared graph input.in_ch3out_ch64kernel3stride1padding1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Conv2D.png"
+    },
+    {
+      "blockTestId": "block-Conv3D",
+      "inserted": true,
+      "nodeText": "Conv3D↗×errorThis node has no incoming edge even though it is not a declared graph input.in_ch1out_ch32kernel3stride1padding1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Conv3D.png"
+    },
+    {
+      "blockTestId": "block-DepthwiseConv2D",
+      "inserted": true,
+      "nodeText": "DepthwiseConv2D↗×errorThis node has no incoming edge even though it is not a declared graph input.in_ch64kernel3stride1padding1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-DepthwiseConv2D.png"
+    },
+    {
+      "blockTestId": "block-SeparableConv2D",
+      "inserted": true,
+      "nodeText": "SeparableConv2D↗×errorThis node has no incoming edge even though it is not a declared graph input.in_ch64out_ch128kernel3⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-SeparableConv2D.png"
+    },
+    {
+      "blockTestId": "block-TransposedConv2D",
+      "inserted": true,
+      "nodeText": "TransposedConv2D↗×errorThis node has no incoming edge even though it is not a declared graph input.in_ch64out_ch32kernel2stride2⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-TransposedConv2D.png"
+    },
+    {
+      "blockTestId": "block-DilatedConv2D",
+      "inserted": true,
+      "nodeText": "DilatedConv2D↗×errorThis node has no incoming edge even though it is not a declared graph input.in_ch64out_ch64kernel3dilation2⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-DilatedConv2D.png"
+    },
+    {
+      "blockTestId": "block-MaxPool2D",
+      "inserted": true,
+      "nodeText": "MaxPool2D↗×errorThis node has no incoming edge even though it is not a declared graph input.kernel2stride2⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-MaxPool2D.png"
+    },
+    {
+      "blockTestId": "block-AvgPool2D",
+      "inserted": true,
+      "nodeText": "AvgPool2D↗×errorThis node has no incoming edge even though it is not a declared graph input.kernel2stride2⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-AvgPool2D.png"
+    },
+    {
+      "blockTestId": "block-GlobalAvgPool",
+      "inserted": true,
+      "nodeText": "GlobalAvgPool↗×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-GlobalAvgPool.png"
+    },
+    {
+      "blockTestId": "block-GlobalMaxPool",
+      "inserted": true,
+      "nodeText": "GlobalMaxPool↗×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-GlobalMaxPool.png"
+    },
+    {
+      "blockTestId": "block-AdaptiveAvgPool",
+      "inserted": true,
+      "nodeText": "AdaptiveAvgPool↗×errorThis node has no incoming edge even though it is not a declared graph input.output_size1,1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-AdaptiveAvgPool.png"
+    },
+    {
+      "blockTestId": "block-ReLU",
+      "inserted": true,
+      "nodeText": "Conv1d↗×errorThis node has no incoming edge even though it is not a declared graph input.in_channels3out_channels64kernel_size3stride1padding0dilation1groups1biastruepadding_modezeros⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-ReLU.png"
+    },
+    {
+      "blockTestId": "block-LeakyReLU",
+      "inserted": true,
+      "nodeText": "LeakyReLU↗×errorThis node has no incoming edge even though it is not a declared graph input.alpha0.01⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-LeakyReLU.png"
+    },
+    {
+      "blockTestId": "block-PReLU",
+      "inserted": true,
+      "nodeText": "Conv3d↗×errorThis node has no incoming edge even though it is not a declared graph input.in_channels3out_channels64kernel_size3stride1padding0dilation1groups1biastruepadding_modezeros⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-PReLU.png"
+    },
+    {
+      "blockTestId": "block-ELU",
+      "inserted": true,
+      "nodeText": "Lazy Conv Transpose2d↗×errorThis node has no incoming edge even though it is not a declared graph input.out_channels64kernel_size3stride1padding0output_padding0groups1biastruedilation1padding_modezeros⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-ELU.png"
+    },
+    {
+      "blockTestId": "block-SELU",
+      "inserted": true,
+      "nodeText": "Lazy Conv Transpose3d↗×errorThis node has no incoming edge even though it is not a declared graph input.out_channels64kernel_size3stride1padding0output_padding0groups1biastruedilation1padding_modezeros⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-SELU.png"
+    },
+    {
+      "blockTestId": "block-GELU",
+      "inserted": true,
+      "nodeText": "Lazy Conv1d↗×errorThis node has no incoming edge even though it is not a declared graph input.out_channels64kernel_size3stride1padding0dilation1groups1biastruepadding_modezeros⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-GELU.png"
+    },
+    {
+      "blockTestId": "block-SiLU",
+      "inserted": true,
+      "nodeText": "Lazy Conv3d↗×errorThis node has no incoming edge even though it is not a declared graph input.out_channels64kernel_size3stride1padding0dilation1groups1biastruepadding_modezeros⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-SiLU.png"
+    },
+    {
+      "blockTestId": "block-Mish",
+      "inserted": false,
+      "nodeText": "",
+      "healthText": "",
+      "error": "expected node count 1, got 0",
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Mish.png"
+    },
+    {
+      "blockTestId": "block-Sigmoid",
+      "inserted": true,
+      "nodeText": "Sigmoid↗×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Sigmoid.png"
+    },
+    {
+      "blockTestId": "block-Tanh",
+      "inserted": true,
+      "nodeText": "ReLU↗×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Tanh.png"
+    },
+    {
+      "blockTestId": "block-Softmax",
+      "inserted": true,
+      "nodeText": "Softmax↗×errorThis node has no incoming edge even though it is not a declared graph input.dim-1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Softmax.png"
+    },
+    {
+      "blockTestId": "block-HardSwish",
+      "inserted": true,
+      "nodeText": "HardSwish↗×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-HardSwish.png"
+    },
+    {
+      "blockTestId": "block-BatchNorm2D",
+      "inserted": true,
+      "nodeText": "BatchNorm2D↗×errorThis node has no incoming edge even though it is not a declared graph input.num_features64⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-BatchNorm2D.png"
+    },
+    {
+      "blockTestId": "block-LayerNorm",
+      "inserted": true,
+      "nodeText": "LayerNorm↗×errorThis node has no incoming edge even though it is not a declared graph input.normalized_shape512⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-LayerNorm.png"
+    },
+    {
+      "blockTestId": "block-GroupNorm",
+      "inserted": true,
+      "nodeText": "GroupNorm↗×errorThis node has no incoming edge even though it is not a declared graph input.num_groups32num_channels64⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-GroupNorm.png"
+    },
+    {
+      "blockTestId": "block-InstanceNorm",
+      "inserted": true,
+      "nodeText": "InstanceNorm↗×errorThis node has no incoming edge even though it is not a declared graph input.num_features64⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-InstanceNorm.png"
+    },
+    {
+      "blockTestId": "block-RMSNorm",
+      "inserted": true,
+      "nodeText": "RMSNorm↗×errorThis node has no incoming edge even though it is not a declared graph input.dim512⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-RMSNorm.png"
+    },
+    {
+      "blockTestId": "block-MultiHeadAttention",
+      "inserted": true,
+      "nodeText": "Multi-Head Attention↗×errorThis node has no incoming edge even though it is not a declared graph input.embed_dim512num_heads8⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-MultiHeadAttention.png"
+    },
+    {
+      "blockTestId": "block-SelfAttention",
+      "inserted": true,
+      "nodeText": "Self-Attention↗×errorThis node has no incoming edge even though it is not a declared graph input.embed_dim512num_heads8⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-SelfAttention.png"
+    },
+    {
+      "blockTestId": "block-CrossAttention",
+      "inserted": true,
+      "nodeText": "Cross-Attention↗×errorThis node has no incoming edge even though it is not a declared graph input.embed_dim512num_heads8⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-CrossAttention.png"
+    },
+    {
+      "blockTestId": "block-FlashAttention",
+      "inserted": true,
+      "nodeText": "Flash Attention↗×errorThis node has no incoming edge even though it is not a declared graph input.embed_dim512num_heads8⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-FlashAttention.png"
+    },
+    {
+      "blockTestId": "block-GQA",
+      "inserted": true,
+      "nodeText": "GQA (Grouped Query)↗×errorThis node has no incoming edge even though it is not a declared graph input.embed_dim512num_heads8num_kv_heads2⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-GQA.png"
+    },
+    {
+      "blockTestId": "block-MQA",
+      "inserted": true,
+      "nodeText": "MQA (Multi-Query)↗×errorThis node has no incoming edge even though it is not a declared graph input.embed_dim512num_heads8⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-MQA.png"
+    },
+    {
+      "blockTestId": "block-LinearAttention",
+      "inserted": true,
+      "nodeText": "Linear Attention↗×errorThis node has no incoming edge even though it is not a declared graph input.embed_dim512⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-LinearAttention.png"
+    },
+    {
+      "blockTestId": "block-LSTM",
+      "inserted": true,
+      "nodeText": "LSTM↗×errorThis node has no incoming edge even though it is not a declared graph input.input_size128hidden_size256num_layers1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-LSTM.png"
+    },
+    {
+      "blockTestId": "block-GRU",
+      "inserted": true,
+      "nodeText": "GRU↗×errorThis node has no incoming edge even though it is not a declared graph input.input_size128hidden_size256⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-GRU.png"
+    },
+    {
+      "blockTestId": "block-RNN",
+      "inserted": true,
+      "nodeText": "RNN↗×errorThis node has no incoming edge even though it is not a declared graph input.input_size128hidden_size256⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-RNN.png"
+    },
+    {
+      "blockTestId": "block-BiLSTM",
+      "inserted": true,
+      "nodeText": "Bidirectional LSTM↗×errorThis node has no incoming edge even though it is not a declared graph input.input_size128hidden_size256⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-BiLSTM.png"
+    },
+    {
+      "blockTestId": "block-BiGRU",
+      "inserted": true,
+      "nodeText": "Bidirectional GRU↗×errorThis node has no incoming edge even though it is not a declared graph input.input_size128hidden_size256⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-BiGRU.png"
+    },
+    {
+      "blockTestId": "block-Embedding",
+      "inserted": true,
+      "nodeText": "Embedding↗×errorThis node has no incoming edge even though it is not a declared graph input.num_embeddings30000embedding_dim512⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Embedding.png"
+    },
+    {
+      "blockTestId": "block-PatchEmbedding",
+      "inserted": true,
+      "nodeText": "Patch Embedding↗×errorThis node has no incoming edge even though it is not a declared graph input.patch_size16embed_dim768⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-PatchEmbedding.png"
+    },
+    {
+      "blockTestId": "block-SinPE",
+      "inserted": true,
+      "nodeText": "Positional Enc (Sin)↗×errorThis node has no incoming edge even though it is not a declared graph input.d_model512max_len5000⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-SinPE.png"
+    },
+    {
+      "blockTestId": "block-LearnedPE",
+      "inserted": true,
+      "nodeText": "Positional Enc (Learned)↗×errorThis node has no incoming edge even though it is not a declared graph input.max_len512d_model768⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-LearnedPE.png"
+    },
+    {
+      "blockTestId": "block-RoPE",
+      "inserted": true,
+      "nodeText": "RoPE↗×errorThis node has no incoming edge even though it is not a declared graph input.dim512⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-RoPE.png"
+    },
+    {
+      "blockTestId": "block-ALiBi",
+      "inserted": true,
+      "nodeText": "ALiBi↗×errorThis node has no incoming edge even though it is not a declared graph input.num_heads8⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-ALiBi.png"
+    },
+    {
+      "blockTestId": "block-TransformerEncoderLayer",
+      "inserted": true,
+      "nodeText": "Transformer Encoder↗×errorThis node has no incoming edge even though it is not a declared graph input.d_model512nhead8dim_feedforward2048⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-TransformerEncoderLayer.png"
+    },
+    {
+      "blockTestId": "block-TransformerDecoderLayer",
+      "inserted": true,
+      "nodeText": "Transformer Decoder↗×errorThis node has no incoming edge even though it is not a declared graph input.d_model512nhead8dim_feedforward2048⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-TransformerDecoderLayer.png"
+    },
+    {
+      "blockTestId": "block-FFN",
+      "inserted": true,
+      "nodeText": "Feed-Forward Network↗×errorThis node has no incoming edge even though it is not a declared graph input.d_model512d_ff2048⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-FFN.png"
+    },
+    {
+      "blockTestId": "block-MoE",
+      "inserted": true,
+      "nodeText": "MoE Layer↗×errorThis node has no incoming edge even though it is not a declared graph input.num_experts8top_k2⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-MoE.png"
+    },
+    {
+      "blockTestId": "block-Flatten",
+      "inserted": true,
+      "nodeText": "Flatten↗×errorThis node has no incoming edge even though it is not a declared graph input.start_dim1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Flatten.png"
+    },
+    {
+      "blockTestId": "block-Reshape",
+      "inserted": true,
+      "nodeText": "Reshape↗×errorThis node has no incoming edge even though it is not a declared graph input.shapeB,-1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Reshape.png"
+    },
+    {
+      "blockTestId": "block-Permute",
+      "inserted": true,
+      "nodeText": "Permute / Transpose↗×errorThis node has no incoming edge even though it is not a declared graph input.dims0,2,3,1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Permute.png"
+    },
+    {
+      "blockTestId": "block-Squeeze",
+      "inserted": true,
+      "nodeText": "Squeeze / Unsqueeze↗×errorThis node has no incoming edge even though it is not a declared graph input.dim1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Squeeze.png"
+    },
+    {
+      "blockTestId": "block-Concat",
+      "inserted": true,
+      "nodeText": "Concat↗×errorThis node has no incoming edge even though it is not a declared graph input.dim1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Concat.png"
+    },
+    {
+      "blockTestId": "block-Add",
+      "inserted": true,
+      "nodeText": "Add (Residual)↗×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Add.png"
+    },
+    {
+      "blockTestId": "block-Split",
+      "inserted": true,
+      "nodeText": "Split↗×errorThis node has no incoming edge even though it is not a declared graph input.split_size1dim1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Split.png"
+    },
+    {
+      "blockTestId": "block-Dropout",
+      "inserted": true,
+      "nodeText": "Dropout↗×errorThis node has no incoming edge even though it is not a declared graph input.p0.5⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Dropout.png"
+    },
+    {
+      "blockTestId": "block-Dropout2D",
+      "inserted": true,
+      "nodeText": "Dropout2D↗×errorThis node has no incoming edge even though it is not a declared graph input.p0.5⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Dropout2D.png"
+    },
+    {
+      "blockTestId": "block-DropPath",
+      "inserted": true,
+      "nodeText": "DropPath / StochasticDepth↗×errorThis node has no incoming edge even though it is not a declared graph input.drop_prob0.1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-DropPath.png"
+    },
+    {
+      "blockTestId": "block-SpatialDropout",
+      "inserted": true,
+      "nodeText": "Spatial Dropout↗×errorThis node has no incoming edge even though it is not a declared graph input.p0.2⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-SpatialDropout.png"
+    },
+    {
+      "blockTestId": "block-Linear",
+      "inserted": true,
+      "nodeText": "Linear (FC)↗×errorThis node has no incoming edge even though it is not a declared graph input.in_features512out_features10⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Linear.png"
+    },
+    {
+      "blockTestId": "block-Bilinear",
+      "inserted": true,
+      "nodeText": "Bilinear↗×errorThis node has no incoming edge even though it is not a declared graph input.in1256in2256out128⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Bilinear.png"
+    },
+    {
+      "blockTestId": "block-Resize",
+      "inserted": true,
+      "nodeText": "Resize↗×errorThis node has no incoming edge even though it is not a declared graph input.size(256, 256)interpolationbilinear⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Resize.png"
+    },
+    {
+      "blockTestId": "block-CenterCrop",
+      "inserted": true,
+      "nodeText": "CenterCrop↗×errorThis node has no incoming edge even though it is not a declared graph input.size(224, 224)⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-CenterCrop.png"
+    },
+    {
+      "blockTestId": "block-RandomCrop",
+      "inserted": true,
+      "nodeText": "RandomCrop↗×errorThis node has no incoming edge even though it is not a declared graph input.size(224, 224)⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-RandomCrop.png"
+    },
+    {
+      "blockTestId": "block-RandomResizedCrop",
+      "inserted": true,
+      "nodeText": "RandomResizedCrop↗×errorThis node has no incoming edge even though it is not a declared graph input.size(224, 224)scale(0.08, 1.0)⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-RandomResizedCrop.png"
+    },
+    {
+      "blockTestId": "block-RandomHorizontalFlip",
+      "inserted": true,
+      "nodeText": "RandomHorizontalFlip↗×errorThis node has no incoming edge even though it is not a declared graph input.p0.5⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-RandomHorizontalFlip.png"
+    },
+    {
+      "blockTestId": "block-ToTensor",
+      "inserted": true,
+      "nodeText": "ToTensor↗×errorThis node has no incoming edge even though it is not a declared graph input.⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-ToTensor.png"
+    },
+    {
+      "blockTestId": "block-Normalize",
+      "inserted": true,
+      "nodeText": "Normalize↗×errorThis node has no incoming edge even though it is not a declared graph input.mean(0.485, 0.456, 0.406)std(0.229, 0.224, 0.225)⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Normalize.png"
+    },
+    {
+      "blockTestId": "block-ColorJitter",
+      "inserted": true,
+      "nodeText": "ColorJitter↗×errorThis node has no incoming edge even though it is not a declared graph input.brightness0.2contrast0.2saturation0.2hue0.1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-ColorJitter.png"
+    },
+    {
+      "blockTestId": "block-Grayscale",
+      "inserted": true,
+      "nodeText": "Grayscale↗×errorThis node has no incoming edge even though it is not a declared graph input.num_output_channels1⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-Grayscale.png"
+    },
+    {
+      "blockTestId": "block-DataSampling",
+      "inserted": true,
+      "nodeText": "DataSampling↗×errorThis node has no incoming edge even though it is not a declared graph input.methodtorch.randnshape(1, 3, 224, 224)⚠ no input",
+      "healthText": "",
+      "error": null,
+      "screenshot": "/home/students/cs/202421012/ai/benchmarks/reports/screenshots/block-DataSampling.png"
+    }
+  ]
+}

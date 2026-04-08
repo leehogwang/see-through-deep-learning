@@ -22,7 +22,7 @@ import LayerNode, { type LayerNodeData } from './nodes/LayerNode'
 // InspectorDrawer는 미니맵 패널로 대체됨
 import { getBlockDef, type ParamValue } from '../../data/blocks'
 import { calcOutputShape, parseShape, type Shape } from '../../lib/shapeCalculator'
-import { generatePyTorchCode } from '../../lib/graphToCode'
+import { generatePyTorchArtifacts, generatePyTorchCode } from '../../lib/graphToCode'
 import {
   type AgentCanvasAction,
   type AgentGraphSnapshot,
@@ -33,7 +33,11 @@ import {
   validateCodexEdit,
   applyCodexSourceEdit,
   parseDirRegistry,
+  traceEditedGraphData,
   traceLayerData,
+  type LayerDataPreview,
+  type TraceEditedGraphDataResult,
+  type TraceLayerDataResult,
   type LoadedModelPayload,
 } from '../../lib/api'
 import { modelToGraph } from '../../lib/modelToGraph'
@@ -117,6 +121,7 @@ function distancePointToSegment(
 function findInsertionEdge(nodes: Node[], edges: Edge[], point: { x: number; y: number }): Edge | null {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   let closest: { edge: Edge; distance: number } | null = null
+  const maxInsertionDistance = 42
 
   for (const edge of edges) {
     const sourceNode = nodeMap.get(edge.source)
@@ -126,14 +131,17 @@ function findInsertionEdge(nodes: Node[], edges: Edge[], point: { x: number; y: 
     const sourceCenter = getNodeCenter(sourceNode)
     const targetCenter = getNodeCenter(targetNode)
     const distance = distancePointToSegment(point, sourceCenter, targetCenter)
-    if (distance > 48) continue
 
     if (!closest || distance < closest.distance) {
       closest = { edge, distance }
     }
   }
 
-  return closest?.edge ?? null
+  if (!closest || closest.distance > maxInsertionDistance) {
+    return null
+  }
+
+  return closest.edge
 }
 
 function spliceEdgeWithNode(edges: Edge[], edgeToReplace: Edge, newNodeId: string): Edge[] {
@@ -177,6 +185,130 @@ function computeFlowReachableNodeIds(nodes: Node[], edges: Edge[]): Set<string> 
   return reachable
 }
 
+function applyTracePreviewsToNodes(
+  prevNodes: Node[],
+  currentEdges: Edge[],
+  result: TraceLayerDataResult,
+): Node[] {
+  const inputEntries = Object.entries(result.inputPreviews)
+  const inputNodeIds = new Set(
+    prevNodes
+      .filter((node) => !currentEdges.some((edge) => edge.target === node.id))
+      .map((node) => node.id),
+  )
+  let inputAssignIndex = 0
+
+  return prevNodes.map((node) => {
+    const data = node.data as LayerNodeData
+
+    if (inputNodeIds.has(node.id)) {
+      const nodeKey = data._attrPath ?? data._attrName
+      const namedEntry = nodeKey
+        ? inputEntries.find(([key]) => key === nodeKey || key.startsWith(nodeKey) || nodeKey.startsWith(key))
+        : undefined
+      if (namedEntry) {
+        return { ...node, data: { ...data, _dataPreview: namedEntry[1] } satisfies LayerNodeData }
+      }
+      const positional = inputEntries[inputAssignIndex]
+      if (positional) {
+        inputAssignIndex += 1
+        return { ...node, data: { ...data, _dataPreview: positional[1] } satisfies LayerNodeData }
+      }
+      return node
+    }
+
+    const matchKey = data._attrPath ?? data._attrName
+    if (matchKey) {
+      if (result.previews[matchKey]) {
+        return { ...node, data: { ...data, _dataPreview: result.previews[matchKey] } satisfies LayerNodeData }
+      }
+      const suffixMatch = Object.entries(result.previews).find(
+        ([key]) => key === matchKey || key.endsWith(`.${matchKey}`) || matchKey.endsWith(`.${key}`),
+      )
+      if (suffixMatch) {
+        return { ...node, data: { ...data, _dataPreview: suffixMatch[1] } satisfies LayerNodeData }
+      }
+    }
+
+    return node
+  })
+}
+
+function applyEditedTracePreviewsToNodes(
+  prevNodes: Node[],
+  currentEdges: Edge[],
+  result: TraceEditedGraphDataResult,
+): Node[] {
+  const inputNodeIds = new Set(
+    prevNodes
+      .filter((node) => !currentEdges.some((edge) => edge.target === node.id))
+      .map((node) => node.id),
+  )
+
+  return prevNodes.map((node) => {
+    const data = node.data as LayerNodeData
+    if (inputNodeIds.has(node.id) && result.inputPreview) {
+      return { ...node, data: { ...data, _dataPreview: result.inputPreview } satisfies LayerNodeData }
+    }
+    const preview = result.previews[node.id]
+    if (!preview) return node
+    return { ...node, data: { ...data, _dataPreview: preview } satisfies LayerNodeData }
+  })
+}
+
+function computeEffectivePreviewMap(nodes: Node[], edges: Edge[]): Map<string, LayerDataPreview> {
+  const previewMap = new Map<string, LayerDataPreview>()
+  const incoming = new Map<string, number>()
+  const adjacency = new Map<string, string[]>()
+
+  for (const node of nodes) {
+    const preview = (node.data as LayerNodeData)._dataPreview
+    if (preview) previewMap.set(node.id, preview)
+    incoming.set(node.id, 0)
+    adjacency.set(node.id, [])
+  }
+
+  for (const edge of edges) {
+    incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1)
+    adjacency.set(edge.source, [...(adjacency.get(edge.source) ?? []), edge.target])
+  }
+
+  const queue = nodes
+    .filter((node) => (incoming.get(node.id) ?? 0) === 0)
+    .map((node) => node.id)
+  const visited = new Set<string>()
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()
+    if (!currentId || visited.has(currentId)) continue
+    visited.add(currentId)
+
+    const inheritedPreview = previewMap.get(currentId)
+    for (const nextId of adjacency.get(currentId) ?? []) {
+      if (!previewMap.has(nextId) && inheritedPreview) {
+        previewMap.set(nextId, inheritedPreview)
+      }
+      incoming.set(nextId, (incoming.get(nextId) ?? 1) - 1)
+      if ((incoming.get(nextId) ?? 0) <= 0) {
+        queue.push(nextId)
+      }
+    }
+  }
+
+  for (const node of nodes) {
+    if (previewMap.has(node.id)) continue
+    const upstreamPreview = edges
+      .filter((edge) => edge.target === node.id)
+      .map((edge) => previewMap.get(edge.source))
+      .find((preview): preview is LayerDataPreview => !!preview)
+    if (upstreamPreview) {
+      previewMap.set(node.id, upstreamPreview)
+    }
+  }
+
+  return previewMap
+}
+
 function parseLockedShape(outputShape?: string): Shape | null {
   if (!outputShape) return null
   const normalized = outputShape.replace(/[()[\]]/g, '').trim()
@@ -186,6 +318,179 @@ function parseLockedShape(outputShape?: string): Shape | null {
   } catch {
     return null
   }
+}
+
+function normalizeBlockTypeName(blockType: string): string {
+  return blockType.toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function parseNodeOutputShape(node: Node | undefined): Shape | null {
+  if (!node) return null
+  const data = node.data as LayerNodeData
+  return parseLockedShape(data.outputShape)
+}
+
+function findPreferredHeadCount(embedDim: number, currentHeads: number): number {
+  if (!Number.isFinite(embedDim) || embedDim <= 0) return Math.max(1, currentHeads || 1)
+  let candidate = Math.max(1, Math.min(currentHeads || 1, embedDim))
+  while (candidate > 1 && embedDim % candidate !== 0) {
+    candidate -= 1
+  }
+  return candidate
+}
+
+function readParamAlias(params: Record<string, ParamValue>, keys: string[]): ParamValue | undefined {
+  for (const key of keys) {
+    if (params[key] !== undefined) return params[key]
+  }
+  return undefined
+}
+
+function writeParamAlias(params: Record<string, ParamValue>, keys: string[], value: ParamValue): boolean {
+  const existingKey = keys.find((key) => params[key] !== undefined) ?? keys[0]
+  let changed = false
+  for (const key of keys) {
+    if (key !== existingKey && params[key] !== undefined) {
+      delete params[key]
+      changed = true
+    }
+  }
+  if (params[existingKey] !== value) {
+    params[existingKey] = value
+    changed = true
+  }
+  return changed
+}
+
+function getExpectedInputWidth(node: Node | undefined): number | null {
+  if (!node) return null
+  const data = node.data as LayerNodeData
+  const params = data.params ?? {}
+  const type = normalizeBlockTypeName(data.blockType)
+
+  if (type === 'linear') {
+    return parseNumericParam(params.in_features as ParamValue | undefined, 0) || null
+  }
+  if (type === 'conv1d' || type === 'conv2d' || type === 'conv3d' || type === 'depthwiseconv2d' || type === 'dilatedconv2d' || type === 'transposedconv2d') {
+    return parseNumericParam(readParamAlias(params, ['in_channels', 'in_ch']) as ParamValue | undefined, 0) || null
+  }
+  if (type === 'batchnorm2d' || type === 'instancenorm') {
+    return parseNumericParam(params.num_features as ParamValue | undefined, 0) || null
+  }
+  if (type === 'groupnorm') {
+    return parseNumericParam(params.num_channels as ParamValue | undefined, 0) || null
+  }
+  if (type === 'layernorm' || type === 'rmsnorm') {
+    return parseNumericParam(params.normalized_shape as ParamValue | undefined, 0) || null
+  }
+  if (type === 'multiheadattention' || type === 'selfattention' || type === 'crossattention' || type === 'flashattention' || type === 'gqa' || type === 'mqa' || type === 'linearattention') {
+    return parseNumericParam(params.embed_dim as ParamValue | undefined, 0) || null
+  }
+  if (type === 'transformerencoderlayer' || type === 'transformerdecoderlayer' || type === 'ffn') {
+    return parseNumericParam((params.d_model ?? params.embed_dim) as ParamValue | undefined, 0) || null
+  }
+  if (type === 'lstm' || type === 'gru' || type === 'rnn' || type === 'bilstm' || type === 'bigru') {
+    return parseNumericParam(params.input_size as ParamValue | undefined, 0) || null
+  }
+
+  return null
+}
+
+function autoConfigureNodeForConnections(node: Node, upstreamShape: Shape | null, downstreamNode?: Node): Node {
+  if (!upstreamShape) return node
+
+  const data = node.data as LayerNodeData
+  const type = normalizeBlockTypeName(data.blockType)
+  const params = { ...data.params }
+  const channelDim = upstreamShape[1]
+  const featureDim = upstreamShape[upstreamShape.length - 1]
+  const downstreamExpected = getExpectedInputWidth(downstreamNode)
+  let changed = false
+
+  if (type === 'conv1d' || type === 'conv2d' || type === 'conv3d' || type === 'depthwiseconv2d' || type === 'dilatedconv2d' || type === 'transposedconv2d') {
+    if (channelDim > 0) {
+      changed = writeParamAlias(params, ['in_channels', 'in_ch'], channelDim) || changed
+    }
+    if (type !== 'depthwiseconv2d' && downstreamExpected && downstreamExpected > 0) {
+      changed = writeParamAlias(params, ['out_channels', 'out_ch'], downstreamExpected) || changed
+    }
+  } else if (type === 'linear') {
+    if (featureDim > 0 && params.in_features !== featureDim) {
+      params.in_features = featureDim
+      changed = true
+    }
+    if (downstreamExpected && downstreamExpected > 0 && params.out_features !== downstreamExpected) {
+      params.out_features = downstreamExpected
+      changed = true
+    }
+  } else if (type === 'batchnorm2d' || type === 'instancenorm') {
+    if (channelDim > 0 && params.num_features !== channelDim) {
+      params.num_features = channelDim
+      changed = true
+    }
+  } else if (type === 'groupnorm') {
+    if (channelDim > 0 && params.num_channels !== channelDim) {
+      params.num_channels = channelDim
+      changed = true
+    }
+  } else if (type === 'layernorm' || type === 'rmsnorm') {
+    if (featureDim > 0 && params.normalized_shape !== featureDim) {
+      params.normalized_shape = featureDim
+      changed = true
+    }
+  } else if (type === 'multiheadattention' || type === 'selfattention' || type === 'crossattention' || type === 'flashattention' || type === 'gqa' || type === 'mqa' || type === 'linearattention') {
+    if (featureDim > 0 && params.embed_dim !== featureDim) {
+      params.embed_dim = featureDim
+      changed = true
+    }
+    const nextHeads = findPreferredHeadCount(featureDim, parseNumericParam(params.num_heads as ParamValue | undefined, 8))
+    if (params.num_heads !== nextHeads) {
+      params.num_heads = nextHeads
+      changed = true
+    }
+  } else if (type === 'transformerencoderlayer' || type === 'transformerdecoderlayer') {
+    if (featureDim > 0 && params.d_model !== featureDim) {
+      params.d_model = featureDim
+      changed = true
+    }
+    const nextHeads = findPreferredHeadCount(featureDim, parseNumericParam(params.nhead as ParamValue | undefined, 8))
+    if (params.nhead !== nextHeads) {
+      params.nhead = nextHeads
+      changed = true
+    }
+  } else if (type === 'lstm' || type === 'gru' || type === 'rnn' || type === 'bilstm' || type === 'bigru') {
+    if (featureDim > 0 && params.input_size !== featureDim) {
+      params.input_size = featureDim
+      changed = true
+    }
+  }
+
+  if (!changed) return node
+
+  return {
+    ...node,
+    data: {
+      ...data,
+      params,
+      _runtimeShapeLocked: false,
+    } satisfies LayerNodeData,
+  }
+}
+
+function autoConfigureTargetsForNewEdges(nodes: Node[], edges: Edge[], targetNodeIds: string[]): Node[] {
+  if (targetNodeIds.length === 0) return nodes
+  const targetSet = new Set(targetNodeIds)
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+
+  return nodes.map((node) => {
+    if (!targetSet.has(node.id)) return node
+    const incomingEdge = edges.find((edge) => edge.target === node.id)
+    if (!incomingEdge) return node
+    const upstreamNode = nodeMap.get(incomingEdge.source)
+    const downstreamEdge = edges.find((edge) => edge.source === node.id)
+    const downstreamNode = downstreamEdge ? nodeMap.get(downstreamEdge.target) : undefined
+    return autoConfigureNodeForConnections(node, parseNodeOutputShape(upstreamNode), downstreamNode)
+  })
 }
 
 function applyConnectionRules(nodes: Node[], edges: Edge[], sourceId: string, targetId: string): Edge[] {
@@ -439,6 +744,14 @@ function graphHealthFromDiagnostics(diagnostics: ReturnType<typeof buildGraphDia
     warningCount,
     infoCount,
   }
+}
+
+function formatLoadedSourcePath(sourceFile: string, repoRoot?: string | null): string {
+  if (repoRoot && sourceFile.startsWith(repoRoot)) {
+    const relativePath = sourceFile.slice(repoRoot.length).replace(/^\//, '')
+    if (relativePath) return relativePath
+  }
+  return sourceFile.split('/').slice(-2).join('/')
 }
 
 function formatTraceMode(traceMode?: string) {
@@ -708,6 +1021,12 @@ interface Props {
   onMergeRequested?: (worktreePath: string, branch: string) => void
 }
 
+type PointerDropDetail = {
+  blockType: string
+  clientX: number
+  clientY: number
+}
+
 const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   { catalogVersion = 0, onNodeSelect, loadedModel, onWorktreeSaved, onGraphSnapshotChange, onMergeRequested }: Props,
   ref,
@@ -717,15 +1036,13 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
-  const [_showCode, setShowCode] = useState(false)
-  void _showCode
-  const [_code, setCode] = useState('')
-  void _code
-  const [savingWorktree, setSavingWorktree] = useState(false)
+  const [generatedCodePreview, setGeneratedCodePreview] = useState<string | null>(null)
   const [worktreeInfo, setWorktreeInfo] = useState<{ path: string; branch: string } | null>(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const retraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const editedTraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const editedTraceRunIdRef = useRef(0)
   const worktreeInfoRef = useRef<{ path: string; branch: string } | null>(null)
   const [expandModules, setExpandModules] = useState(false)
   const [hideUtilityOps, setHideUtilityOps] = useState(true)
@@ -790,15 +1107,65 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     }
   }, [setEdges, setNodes, loadedModel])
 
+  const markGraphAsEdited = useCallback(() => {
+    agentDirtyRef.current = true
+  }, [])
+
+  const insertBlockAtClientPoint = useCallback((blockType: string, clientX: number, clientY: number) => {
+    if (!blockType) return
+    if (!getBlockDef(blockType)) return
+
+    const instance = rfInstanceRef.current as unknown as {
+      screenToFlowPosition?: (position: { x: number; y: number }) => { x: number; y: number }
+    } | null
+    const bounds = reactFlowWrapper.current?.getBoundingClientRect()
+    if (!bounds) return
+
+    const flowPosition = instance?.screenToFlowPosition
+      ? instance.screenToFlowPosition({ x: clientX, y: clientY })
+      : {
+          x: clientX - bounds.left,
+          y: clientY - bounds.top,
+        }
+
+    const position = {
+      x: flowPosition.x - 70,
+      y: flowPosition.y - 30,
+    }
+
+    const newNode = createNodeFromBlock(blockType, nodesRef.current, undefined, position, nodesRef.current.length)
+    if (!newNode) return
+
+    const insertionEdge = edgesRef.current.length > 0
+      ? findInsertionEdge(nodesRef.current, edgesRef.current, flowPosition)
+      : null
+    const nextEdges = insertionEdge
+      ? spliceEdgeWithNode(edgesRef.current, insertionEdge, newNode.id)
+      : edgesRef.current
+
+    const nextNodes = autoConfigureTargetsForNewEdges([...nodesRef.current, newNode], nextEdges, [newNode.id])
+    markGraphAsEdited()
+    commitGraph(nextNodes, nextEdges)
+    window.dispatchEvent(new Event('dl-viz-reset-palette'))
+    if (insertionEdge) {
+      setSurfaceStatus({
+        level: 'success',
+        message: `Inserted ${blockType} between ${insertionEdge.source} and ${insertionEdge.target}.`,
+      })
+    }
+  }, [commitGraph, markGraphAsEdited])
+
   const handleNodesChange = useCallback((changes: NodeChange<Node>[]) => {
     const nextNodes = applyNodeChanges(changes, nodesRef.current)
+    markGraphAsEdited()
     commitGraph(nextNodes, edgesRef.current)
-  }, [commitGraph])
+  }, [commitGraph, markGraphAsEdited])
 
   const handleEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
     const nextEdges = applyEdgeChanges(changes, edgesRef.current)
+    markGraphAsEdited()
     commitGraph(nodesRef.current, nextEdges)
-  }, [commitGraph])
+  }, [commitGraph, markGraphAsEdited])
 
   useEffect(() => {
     nodesRef.current = nodes
@@ -811,6 +1178,16 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   useEffect(() => {
     onGraphSnapshotChange?.(buildGraphSnapshot(nodes, edges))
   }, [edges, nodes, onGraphSnapshotChange])
+
+  useEffect(() => {
+    const handlePointerDrop = (event: Event) => {
+      const detail = (event as CustomEvent<PointerDropDetail>).detail
+      if (!detail?.blockType) return
+      insertBlockAtClientPoint(detail.blockType, detail.clientX, detail.clientY)
+    }
+    window.addEventListener('dl-viz-pointer-drop-block', handlePointerDrop as EventListener)
+    return () => window.removeEventListener('dl-viz-pointer-drop-block', handlePointerDrop as EventListener)
+  }, [insertBlockAtClientPoint])
 
   useImperativeHandle(ref, () => ({
     async executeAgentActions(actions) {
@@ -830,6 +1207,54 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
   useEffect(() => {
     setResolvedRegistry(loadedModel?.registry ?? {})
   }, [loadedModel])
+
+  useEffect(() => {
+    if (!agentDirtyRef.current) return
+    if (!loadedModel?.sourceFile || !loadedModel.model?.name) return
+    if (nodes.length === 0) return
+
+    const gitRoot = loadedModel.gitInfo?.root
+    const repoRoot = gitRoot ?? loadedModel.sourceFile.replace(/\/[^/]+$/, '')
+    const inputNodeIds = nodes
+      .filter((node) => !edges.some((edge) => edge.target === node.id))
+      .map((node) => node.id)
+    const { code, aliasMap } = generatePyTorchArtifacts(nodes, edges)
+    const runId = editedTraceRunIdRef.current + 1
+    editedTraceRunIdRef.current = runId
+
+    if (editedTraceTimerRef.current) clearTimeout(editedTraceTimerRef.current)
+    editedTraceTimerRef.current = setTimeout(() => {
+      traceEditedGraphData({
+        repoRoot,
+        sourceFile: loadedModel.sourceFile,
+        modelName: loadedModel.model.name,
+        runtimeFactory: loadedModel.constructorCallable ?? null,
+        task: loadedModel.benchmark?.task ?? '',
+        sample: loadedModel.samplePreview?.resolvedPath ? {
+          resolvedPath: loadedModel.samplePreview.resolvedPath,
+          width: loadedModel.samplePreview.width,
+          height: loadedModel.samplePreview.height,
+          mimeType: loadedModel.samplePreview.mimeType,
+          source: loadedModel.samplePreview.source,
+          strategy: loadedModel.samplePreview.strategy,
+        } : null,
+        code,
+        aliasMap,
+        inputNodeIds,
+      }).then((result) => {
+        if (editedTraceRunIdRef.current !== runId) return
+        if (result.error && Object.keys(result.previews).length === 0 && !result.inputPreview) {
+          setSurfaceStatus({ level: 'error', message: `Edited graph trace failed: ${result.error}` })
+          return
+        }
+        setNodes((prevNodes) => applyEditedTracePreviewsToNodes(prevNodes, edgesRef.current, result))
+      }).catch(() => {})
+    }, 700)
+
+    return () => {
+      if (editedTraceTimerRef.current) clearTimeout(editedTraceTimerRef.current)
+    }
+  }, [edges, loadedModel, nodes, setNodes])
 
   // worktreeInfo ref \ub3d9\uae30\ud654 (\ucf5c\ubc31 \ud074\ub85c\uc800\uc5d0\uc11c \uc0ac\uc6a9\ud558\uae30 \uc704\ud574)\n  useEffect(() => {\n    worktreeInfoRef.current = worktreeInfo\n  }, [worktreeInfo])
 
@@ -853,6 +1278,30 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedModel?.sourceFile])
+
+  useEffect(() => {
+    if (!worktreeInfo?.path || !loadedModel?.gitInfo.root || !loadedModel?.sourceFile) return
+    if (!agentDirtyRef.current) return
+
+    const gitRoot = loadedModel.gitInfo.root
+    const sourceFile = loadedModel.sourceFile
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    setAutoSaveStatus('saving')
+
+    const currentNodes = nodesRef.current
+    const currentEdges = edgesRef.current
+
+    void (async () => {
+      try {
+        const generated = generatePyTorchCode(currentNodes, currentEdges)
+        await saveToWorktree(worktreeInfo.path, gitRoot, sourceFile, generated)
+        setAutoSaveStatus('saved')
+      } catch (_) {
+        setAutoSaveStatus('error')
+      }
+    })()
+  }, [loadedModel?.gitInfo.root, loadedModel?.sourceFile, worktreeInfo])
 
   useEffect(() => {
     if (!loadedModel || !expandModules) return
@@ -929,63 +1378,7 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
       if (cancelled) return
       if (result.error && Object.keys(result.previews).length === 0 && Object.keys(result.inputPreviews).length === 0) return
 
-      // Pre-compute ordered input entries so multi-input models can match positionally
-      const inputEntries = Object.entries(result.inputPreviews)
-
-      setNodes((prevNodes) => {
-        // Collect all input-like nodes (no incoming edges) so each gets its own
-        // input tensor positionally — works for any number of inputs and any
-        // block type used as the graph entry point, not just blockType === 'Input'.
-        const currentEdges = edgesRef.current
-        const inputNodeIds = new Set(
-          prevNodes
-            .filter((n) => !currentEdges.some((e) => e.target === n.id))
-            .map((n) => n.id),
-        )
-        let inputAssignIndex = 0
-
-        return prevNodes.map((node) => {
-          const data = node.data as LayerNodeData
-
-          // ── Input-like nodes: no incoming edges → assign input tensor previews ──
-          // Detection is structural, not by blockType string, so it generalises to
-          // any architecture (e.g. nn.Sequential, custom modules, multi-input models).
-          if (inputNodeIds.has(node.id)) {
-            const nodeKey = data._attrPath ?? data._attrName
-            const namedEntry = nodeKey
-              ? inputEntries.find(([k]) => k === nodeKey || k.startsWith(nodeKey) || nodeKey.startsWith(k))
-              : undefined
-            if (namedEntry) {
-              return { ...node, data: { ...data, _dataPreview: namedEntry[1] } satisfies LayerNodeData }
-            }
-            // Fall back to positional assignment so each Input card gets a distinct tensor
-            const positional = inputEntries[inputAssignIndex]
-            if (positional) {
-              inputAssignIndex += 1
-              return { ...node, data: { ...data, _dataPreview: positional[1] } satisfies LayerNodeData }
-            }
-            return node
-          }
-
-          // ── All other nodes: match by _attrPath / _attrName ──
-          const matchKey = data._attrPath ?? data._attrName
-          if (matchKey) {
-            // Exact match
-            if (result.previews[matchKey]) {
-              return { ...node, data: { ...data, _dataPreview: result.previews[matchKey] } satisfies LayerNodeData }
-            }
-            // Suffix / prefix match (dotted paths like "layer1.0" vs "layer1.0.conv")
-            const suffixMatch = Object.entries(result.previews).find(
-              ([k]) => k === matchKey || k.endsWith(`.${matchKey}`) || matchKey.endsWith(`.${k}`),
-            )
-            if (suffixMatch) {
-              return { ...node, data: { ...data, _dataPreview: suffixMatch[1] } satisfies LayerNodeData }
-            }
-          }
-
-          return node
-        })
-      })
+      setNodes((prevNodes) => applyTracePreviewsToNodes(prevNodes, edgesRef.current, result))
     }).catch(() => { /* trace failure is silent — cards remain visible without preview */ })
 
     return () => { cancelled = true }
@@ -1018,10 +1411,11 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
 
   const handleDeleteNode = useCallback((nodeId: string) => {
     const next = removeNodeFromGraph(nodesRef.current, edgesRef.current, nodeId)
+    markGraphAsEdited()
     commitGraph(next.nodes, next.edges)
     setPendingConnectionSourceId((current) => (current === nodeId ? null : current))
     onNodeSelect(null)
-  }, [commitGraph, onNodeSelect])
+  }, [commitGraph, markGraphAsEdited, onNodeSelect])
 
   const handleStartConnect = useCallback((nodeId: string) => {
     setPendingConnectionSourceId((current) => (current === nodeId ? null : nodeId))
@@ -1044,6 +1438,7 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
         } satisfies LayerNodeData,
       }
     })
+    markGraphAsEdited()
     commitGraph(nextNodes, edgesRef.current)
 
     // 파라미터 변경 후 1.5초 debounce → trace 재실행 (미리보기 이미지 갱신)
@@ -1072,47 +1467,25 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
         }
         traceLayerData(payload).then((result) => {
           if (result.error && Object.keys(result.previews).length === 0 && Object.keys(result.inputPreviews).length === 0) return
-          const inputEntries = Object.entries(result.inputPreviews)
-          setNodes((prevNodes) => {
-            const currentEdges = edgesRef.current
-            const inputNodeIds = new Set(
-              prevNodes.filter((n) => !currentEdges.some((e) => e.target === n.id)).map((n) => n.id)
-            )
-            let inputAssignIndex = 0
-            return prevNodes.map((node) => {
-              const data = node.data as LayerNodeData
-              if (inputNodeIds.has(node.id)) {
-                const nodeKey = data._attrPath ?? data._attrName
-                const namedEntry = nodeKey
-                  ? inputEntries.find(([k]) => k === nodeKey || k.startsWith(nodeKey) || nodeKey.startsWith(k))
-                  : undefined
-                if (namedEntry) return { ...node, data: { ...data, _dataPreview: namedEntry[1] } satisfies LayerNodeData }
-                const positional = inputEntries[inputAssignIndex]
-                if (positional) { inputAssignIndex += 1; return { ...node, data: { ...data, _dataPreview: positional[1] } satisfies LayerNodeData } }
-                return node
-              }
-              const matchKey = data._attrPath ?? data._attrName
-              if (matchKey) {
-                if (result.previews[matchKey]) return { ...node, data: { ...data, _dataPreview: result.previews[matchKey] } satisfies LayerNodeData }
-                const suffixMatch = Object.entries(result.previews).find(([k]) => k === matchKey || k.endsWith(`.${matchKey}`) || matchKey.endsWith(`.${k}`))
-                if (suffixMatch) return { ...node, data: { ...data, _dataPreview: suffixMatch[1] } satisfies LayerNodeData }
-              }
-              return node
-            })
-          })
+          setNodes((prevNodes) => applyTracePreviewsToNodes(prevNodes, edgesRef.current, result))
         }).catch(() => {})
       }, 1500)
     }
-  }, [commitGraph])
+  }, [commitGraph, markGraphAsEdited])
 
   const diagnostics = buildGraphDiagnostics(nodes, edges, loadedModel?.model)
   const graphHealth = graphHealthFromDiagnostics(diagnostics)
+  const blockingGraphDiagnostic = diagnostics.find((item) => item.severity === 'error')
+  const blockingGraphMessage = blockingGraphDiagnostic
+    ? `${blockingGraphDiagnostic.title}: ${blockingGraphDiagnostic.detail}`
+    : ''
+  const effectivePreviewMap = computeEffectivePreviewMap(nodes, edges)
 
   // 노드 id → outputShape / hasData / tensorSample 맵 (엣지 장식용)
   const nodeShapeMap = new Map(
     nodes.map(n => {
       const nd = n.data as LayerNodeData
-      const preview = nd._dataPreview
+      const preview = effectivePreviewMap.get(n.id) ?? nd._dataPreview
       const tensorSample = preview?.kind === 'vector'
         ? preview.values.slice(0, 5)
         : undefined
@@ -1125,6 +1498,7 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     ...node,
     data: {
       ...(node.data as LayerNodeData),
+      _dataPreview: effectivePreviewMap.get(node.id) ?? (node.data as LayerNodeData)._dataPreview,
       _canStartConnect: (node.data as LayerNodeData).blockType !== 'Output',
       _onStartConnect: handleStartConnect,
       _isPendingConnectSource: pendingConnectionSourceId === node.id,
@@ -1150,47 +1524,29 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
     }
   })
 
-  const handleSaveWorktree = async () => {
-    if (!loadedModel?.gitInfo.isGit || !loadedModel?.gitInfo.root) return
-
-    setSavingWorktree(true)
-    try {
-      const worktree = await createWorktree(loadedModel.gitInfo.root, loadedModel.sourceFile)
-      const generatedCode = generatePyTorchCode(nodes, edges)
-      await saveToWorktree(worktree.worktreePath, loadedModel.gitInfo.root, loadedModel.sourceFile, generatedCode)
-      setWorktreeInfo({ path: worktree.worktreePath, branch: worktree.branch })
-      setSurfaceStatus({ level: 'success', message: `Saved generated code to worktree branch ${worktree.branch}.` })
-      onWorktreeSaved?.(worktree.worktreePath, worktree.branch)
-    } catch (cause: unknown) {
-      setSurfaceStatus({
-        level: 'error',
-        message: `Worktree save failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-      })
-    } finally {
-      setSavingWorktree(false)
-    }
-  }
-
   const handleAutoLayout = useCallback((direction: 'LR' | 'TB' | 'RL' | 'BT' = 'LR') => {
     const laidOut = layoutGraphWithDirection(nodesRef.current, edgesRef.current, direction)
+    markGraphAsEdited()
     commitGraph(laidOut.nodes, laidOut.edges)
     setSurfaceStatus({ level: 'success', message: `Auto layout applied (${direction}).` })
-  }, [commitGraph])
+  }, [commitGraph, markGraphAsEdited])
   void handleAutoLayout
 
   const handleNormalizeInputShapes = useCallback(() => {
     const normalized = normalizeInputNodeShapes(nodesRef.current, edgesRef.current)
+    markGraphAsEdited()
     commitGraph(normalized, edgesRef.current)
     setSurfaceStatus({ level: 'success', message: 'Normalized Input node shapes to match connected downstream layers.' })
-  }, [commitGraph])
+  }, [commitGraph, markGraphAsEdited])
   void handleNormalizeInputShapes
 
   const handleClearGraph = useCallback(() => {
+    markGraphAsEdited()
     commitGraph([], [])
     setWorktreeInfo(null)
     setPendingConnectionSourceId(null)
     setSurfaceStatus({ level: 'success', message: 'Canvas cleared.' })
-  }, [commitGraph])
+  }, [commitGraph, markGraphAsEdited])
 
   const handleValidateCodex = async () => {
     setCodexValidation({ status: 'running', message: 'Running official codex exec validation…' })
@@ -1242,54 +1598,22 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
 
   const onConnect = useCallback((params: Connection) => {
     if (!params.source || !params.target) return
-    commitGraph(nodesRef.current, applyConnectionRules(nodesRef.current, edgesRef.current, params.source, params.target))
-  }, [commitGraph])
+    const nextEdges = applyConnectionRules(nodesRef.current, edgesRef.current, params.source, params.target)
+    const nextNodes = autoConfigureTargetsForNewEdges(nodesRef.current, nextEdges, [params.target])
+    markGraphAsEdited()
+    commitGraph(nextNodes, nextEdges)
+  }, [commitGraph, markGraphAsEdited])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
+    event.dataTransfer.dropEffect = 'copy'
   }, [])
 
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault()
     const blockType = event.dataTransfer.getData('application/dl-block-type')
-    if (!blockType) return
-    if (!getBlockDef(blockType)) return
-
-    const instance = rfInstanceRef.current as unknown as {
-      screenToFlowPosition?: (position: { x: number; y: number }) => { x: number; y: number }
-    } | null
-    const bounds = reactFlowWrapper.current?.getBoundingClientRect()
-    if (!bounds) return
-
-    const flowPosition = instance?.screenToFlowPosition
-      ? instance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      : {
-          x: event.clientX - bounds.left,
-          y: event.clientY - bounds.top,
-        }
-
-    const position = {
-      x: flowPosition.x - 70,
-      y: flowPosition.y - 30,
-    }
-
-    const newNode = createNodeFromBlock(blockType, nodesRef.current, undefined, position, nodesRef.current.length)
-    if (!newNode) return
-
-    const insertionEdge = findInsertionEdge(nodesRef.current, edgesRef.current, flowPosition)
-    const nextEdges = insertionEdge
-      ? spliceEdgeWithNode(edgesRef.current, insertionEdge, newNode.id)
-      : edgesRef.current
-
-    commitGraph([...nodesRef.current, newNode], nextEdges)
-    if (insertionEdge) {
-      setSurfaceStatus({
-        level: 'success',
-        message: `Inserted ${blockType} between ${insertionEdge.source} and ${insertionEdge.target}.`,
-      })
-    }
-  }, [commitGraph])
+    insertBlockAtClientPoint(blockType, event.clientX, event.clientY)
+  }, [insertBlockAtClientPoint])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     const data = node.data as LayerNodeData
@@ -1297,26 +1621,23 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
       if (pendingConnectionSourceId === node.id) {
         setPendingConnectionSourceId(null)
       } else {
-        commitGraph(nodesRef.current, applyConnectionRules(nodesRef.current, edgesRef.current, pendingConnectionSourceId, node.id))
+        const nextEdges = applyConnectionRules(nodesRef.current, edgesRef.current, pendingConnectionSourceId, node.id)
+        const nextNodes = autoConfigureTargetsForNewEdges(nodesRef.current, nextEdges, [node.id])
+        markGraphAsEdited()
+        commitGraph(nextNodes, nextEdges)
         setPendingConnectionSourceId(null)
       }
     }
     onNodeSelect(data.blockType)
-  }, [commitGraph, onNodeSelect, pendingConnectionSourceId])
+  }, [commitGraph, markGraphAsEdited, onNodeSelect, pendingConnectionSourceId])
 
   const onPaneClick = useCallback(() => {
     setPendingConnectionSourceId(null)
     onNodeSelect(null)
   }, [onNodeSelect])
 
-  const handleGenerateCode = () => {
-    const generated = generatePyTorchCode(nodes, edges)
-    setCode(generated)
-    setShowCode(true)
-  }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -1334,8 +1655,8 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
             >
               {loadedModel.model.name}
             </span>
-            <span style={{ fontSize: 10, color: '#475569' }}>
-              {loadedModel.sourceFile.split('/').slice(-2).join('/')}
+            <span style={{ fontSize: 10, color: '#475569' }} title={loadedModel.sourceFile}>
+              {formatLoadedSourcePath(loadedModel.sourceFile, loadedModel.gitInfo.root)}
             </span>
             {loadedModel.gitInfo.isGit && (
               <span style={{
@@ -1460,23 +1781,25 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
           </span>
         )}
 
-        {loadedModel?.gitInfo.isGit && (
-          <button
-            data-testid="save-worktree-button"
-            onClick={handleSaveWorktree}
-            disabled={savingWorktree}
+        {!surfaceStatus.message && blockingGraphMessage && (
+          <span
+            data-testid="graph-blocking-message"
             style={{
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: 'none',
-              fontSize: 12,
-              background: savingWorktree ? '#374151' : '#059669',
-              color: 'white',
-              cursor: savingWorktree ? 'default' : 'pointer',
+              fontSize: 10,
+              padding: '1px 6px',
+              borderRadius: 4,
+              background: '#3f1d1d',
+              color: '#fecaca',
+              border: '1px solid #334155',
+              maxWidth: 360,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}
+            title={blockingGraphMessage}
           >
-            {savingWorktree ? 'Creating worktree…' : 'Save to Worktree'}
-          </button>
+            {blockingGraphMessage}
+          </span>
         )}
 
         <button
@@ -1496,22 +1819,6 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
           Clear
         </button>
 
-        <button
-          data-testid="generate-code-button"
-          onClick={handleGenerateCode}
-          style={{
-            padding: '5px 12px',
-            borderRadius: 6,
-            border: 'none',
-            background: '#4f46e5',
-            color: 'white',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
-        >
-          Generate PyTorch Code
-        </button>
-
         {/* 워크트리 자동저장 상태 + Merge 버튼 */}
         {worktreeInfo && (
           <>
@@ -1524,14 +1831,17 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
             <button
               data-testid="merge-worktree-button"
               onClick={() => onMergeRequested?.(worktreeInfo.path, worktreeInfo.branch)}
+              disabled={!!blockingGraphDiagnostic}
+              title={blockingGraphDiagnostic ? blockingGraphMessage : 'Merge saved worktree changes into main'}
               style={{
                 padding: '5px 12px',
                 borderRadius: 6,
                 border: '1px solid #22c55e',
                 background: 'transparent',
-                color: '#22c55e',
+                color: blockingGraphDiagnostic ? '#4b5563' : '#22c55e',
                 fontSize: 12,
-                cursor: 'pointer',
+                cursor: blockingGraphDiagnostic ? 'not-allowed' : 'pointer',
+                opacity: blockingGraphDiagnostic ? 0.6 : 1,
               }}
             >
               ⬆ Merge to Main
@@ -1588,11 +1898,88 @@ const FlowCanvas = forwardRef<FlowCanvasHandle, Props>(function FlowCanvas(
           graphHealth={graphHealth}
           diagnostics={diagnostics}
           loadedModel={loadedModel}
+          onOpenGeneratedCode={() => setGeneratedCodePreview(generatePyTorchCode(nodesRef.current, edgesRef.current))}
           onNavigate={(x, y) => {
             const inst = rfInstanceRef.current as unknown as { setCenter: (x: number, y: number, opts: object) => void; getZoom: () => number } | null
             if (inst) inst.setCenter(x, y, { zoom: inst.getZoom(), duration: 400 })
           }}
         />
+      )}
+
+      {generatedCodePreview && (
+        <div
+          data-testid="generated-code-modal"
+          style={{
+            position: 'absolute',
+            inset: 20,
+            background: 'rgba(2, 6, 23, 0.82)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 30,
+          }}
+          onClick={() => setGeneratedCodePreview(null)}
+        >
+          <div
+            style={{
+              width: 'min(980px, 92vw)',
+              height: 'min(720px, 82vh)',
+              background: '#020617',
+              border: '1px solid #334155',
+              borderRadius: 12,
+              boxShadow: '0 30px 80px rgba(0, 0, 0, 0.45)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 14px',
+              borderBottom: '1px solid #1e293b',
+              background: '#0f172a',
+            }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>Generated PyTorch Code</div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Advanced preview from the current canvas graph</div>
+              </div>
+              <button
+                onClick={() => setGeneratedCodePreview(null)}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  border: '1px solid #334155',
+                  background: '#111827',
+                  color: '#cbd5e1',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <pre
+              data-testid="generated-code-preview"
+              style={{
+                margin: 0,
+                padding: 16,
+                flex: 1,
+                overflow: 'auto',
+                background: '#020617',
+                color: '#cbd5e1',
+                fontSize: 12,
+                lineHeight: 1.55,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {generatedCodePreview}
+            </pre>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -1709,6 +2096,7 @@ function BottomBar({
   graphHealth,
   diagnostics,
   loadedModel,
+  onOpenGeneratedCode,
   onNavigate,
 }: {
   nodes: import('@xyflow/react').Node[]
@@ -1716,6 +2104,7 @@ function BottomBar({
   graphHealth: { level: string; label: string }
   diagnostics: { severity: string }[]
   loadedModel?: import('../../lib/api').LoadedModelPayload | null
+  onOpenGeneratedCode?: () => void
   onNavigate?: (canvasX: number, canvasY: number) => void
 }) {
 
@@ -1792,7 +2181,7 @@ function BottomBar({
 
       {/* Graph Stats */}
       <div style={{
-        width: 200,
+        width: 240,
         borderLeft: '1px solid #1e2535',
         padding: '10px 14px',
         display: 'flex',
@@ -1818,6 +2207,27 @@ function BottomBar({
             {diagnostics.filter(d => d.severity === 'error').length} error(s)
           </div>
         )}
+        <div style={{ marginTop: 6, paddingTop: 8, borderTop: '1px solid #1e2535' }}>
+          <div style={{ fontSize: 9, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 8 }}>
+            Advanced
+          </div>
+          <button
+            data-testid="generate-code-button"
+            onClick={onOpenGeneratedCode}
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 8,
+              border: '1px solid #334155',
+              background: '#111827',
+              color: '#cbd5e1',
+              fontSize: 11,
+              cursor: 'pointer',
+            }}
+          >
+            Preview generated code
+          </button>
+        </div>
       </div>
     </div>
   )

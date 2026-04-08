@@ -46,7 +46,11 @@ export default function App() {
     setWorktreeNotice('⏳ 병합 중…')
     try {
       const result = await mergeWorktreeToMain(loadedModel.gitInfo.root, worktreePath, branch)
-      setWorktreeNotice(`✓ 병합 완료 (${branch} → main)`)
+      if (result.diffSummary.includes('변경 사항 없음')) {
+        setWorktreeNotice(`ℹ 병합할 변경 없음 (${branch})`)
+      } else {
+        setWorktreeNotice(`✓ 병합 완료 (${branch} → main)`)
+      }
       console.info('[dl-viz] merge diff:\n', result.diffSummary)
     } catch (e) {
       setWorktreeNotice(`✗ 병합 실패: ${e instanceof Error ? e.message : String(e)}`)

@@ -345,6 +345,12 @@ export interface TraceLayerDataResult {
   error: string | null
 }
 
+export interface TraceEditedGraphDataResult {
+  previews: Record<string, LayerDataPreview>
+  inputPreview: LayerDataPreview | null
+  error: string | null
+}
+
 /**
  * Ask the server to run trace_layer_data.py against the loaded model.
  * Payload mirrors the runtime_trace.py payload format.
@@ -378,5 +384,39 @@ export async function traceLayerData(payload: {
     return r.json()
   } catch (cause) {
     return { previews: {}, inputPreviews: {}, error: String(cause) }
+  }
+}
+
+export async function traceEditedGraphData(payload: {
+  repoRoot: string
+  sourceFile: string
+  modelName: string
+  runtimeFactory?: string | null
+  task?: string
+  sample?: {
+    resolvedPath?: string
+    width?: number
+    height?: number
+    mimeType?: string
+    source?: string
+    strategy?: string
+  } | null
+  code: string
+  aliasMap: Record<string, string>
+  inputNodeIds: string[]
+}): Promise<TraceEditedGraphDataResult> {
+  try {
+    const r = await fetch(`${BASE}/api/trace-edited-graph-data`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}))
+      return { previews: {}, inputPreview: null, error: body.error ?? `HTTP ${r.status}` }
+    }
+    return r.json()
+  } catch (cause) {
+    return { previews: {}, inputPreview: null, error: String(cause) }
   }
 }

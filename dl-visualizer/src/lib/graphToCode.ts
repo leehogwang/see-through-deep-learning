@@ -23,8 +23,18 @@ function getTopologicalOrder(nodes: Node[], edges: Edge[]): Node[] {
   return result
 }
 
-export function generatePyTorchCode(nodes: Node[], edges: Edge[]): string {
-  if (nodes.length === 0) return '# No layers defined yet'
+export interface GeneratedModelArtifacts {
+  code: string
+  aliasMap: Record<string, string>
+}
+
+export function generatePyTorchArtifacts(nodes: Node[], edges: Edge[]): GeneratedModelArtifacts {
+  if (nodes.length === 0) {
+    return {
+      code: '# No layers defined yet',
+      aliasMap: {},
+    }
+  }
 
   const ordered = getTopologicalOrder(nodes, edges)
   const lines: string[] = [
@@ -51,8 +61,8 @@ export function generatePyTorchCode(nodes: Node[], edges: Edge[]): string {
     return name
   }
 
-  const p = (data: LayerNodeData) => data.params
-  const py = (value: ParamValue, tupleish = false) => formatPythonValue(value, tupleish)
+  const p = (data: LayerNodeData) => data.params ?? {}
+  const py = (value: ParamValue | undefined | null, tupleish = false) => formatPythonValue(value, tupleish)
 
   ordered.forEach(node => {
     const data = node.data as LayerNodeData
@@ -147,14 +157,22 @@ export function generatePyTorchCode(nodes: Node[], edges: Edge[]): string {
   lines.push('', '', 'model = GeneratedModel()')
   lines.push('print(model)')
 
-  return lines.join('\n')
+  return {
+    code: lines.join('\n'),
+    aliasMap: varNames,
+  }
 }
 
-function formatPythonValue(value: ParamValue, tupleish = false): string {
+export function generatePyTorchCode(nodes: Node[], edges: Edge[]): string {
+  return generatePyTorchArtifacts(nodes, edges).code
+}
+
+function formatPythonValue(value: ParamValue | undefined | null, tupleish = false): string {
+  if (value == null) return 'None'
   if (typeof value === 'boolean') return value ? 'True' : 'False'
   if (typeof value === 'number') return String(value)
 
-  const trimmed = value.trim()
+  const trimmed = String(value).trim()
   if (trimmed.length === 0) return "''"
   if (trimmed === 'None' || trimmed === 'True' || trimmed === 'False') return trimmed
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed
@@ -170,7 +188,8 @@ function buildGenericLayerCall(type: string, params: Record<string, ParamValue>)
   }
 
   const definition = getBlockDef(type)
-  const entries = Object.entries(params).filter(([key]) => key !== 'class')
+  const normalizedParams = normalizeGenericParams(type, params)
+  const entries = Object.entries(normalizedParams).filter(([, value]) => value != null)
   const argList = entries.map(([key, value]) => {
     const tupleish = typeof value === 'string' && value.includes(',')
       || /(?:shape|size|dims|kernel|stride|padding|dilation)$/i.test(key)
@@ -182,4 +201,23 @@ function buildGenericLayerCall(type: string, params: Record<string, ParamValue>)
   }
 
   return `nn.Identity()  # ${type}`
+}
+
+function normalizeGenericParams(type: string, params: Record<string, ParamValue>): Record<string, ParamValue> {
+  const normalized = { ...params }
+  const lowerType = type.toLowerCase()
+
+  const renameAlias = (from: string, to: string) => {
+    if (normalized[from] === undefined) return
+    normalized[to] = normalized[from]
+    delete normalized[from]
+  }
+
+  if (lowerType.includes('conv')) {
+    renameAlias('in_ch', 'in_channels')
+    renameAlias('out_ch', 'out_channels')
+    renameAlias('kernel', 'kernel_size')
+  }
+
+  return normalized
 }

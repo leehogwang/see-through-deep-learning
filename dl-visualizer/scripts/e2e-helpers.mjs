@@ -12,7 +12,9 @@ export async function ensureServer() {
 }
 
 export async function openApp(page) {
-  await page.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' })
+  await page.goto('http://127.0.0.1:5173', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('flow-canvas').waitFor({ state: 'visible', timeout: 30000 })
+  await page.getByTestId('block-search-input').waitFor({ state: 'visible', timeout: 30000 })
 }
 
 export async function dragBlockOntoCanvas(page, blockTestId, canvasLocator, xOffset, yOffset) {
